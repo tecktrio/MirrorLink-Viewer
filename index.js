@@ -22,101 +22,195 @@ else {
     SERVER_URL = SERVER_ROOT_LOCAL_URL
     SERVER_WEBSOCKET_URL = CONTROLLER_WEBSOCKET_LOCAL_URL
 }
+function Login(e) {
+    e.preventDefault();
 
-function openDB(data) {
-    
-    const request = indexedDB.open("fileDatabase", 1);
-    
+    // Get input values
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    const errorText = document.getElementById("error");
+    // Basic validation
+    if (username === "" || password === "") {
+        alert("Both fields are required.");
+        return;
+    }
+    let request_data = {
+        'username': username,
+        'password': password,
+        'service': 'login'
+    }
+    fetch(SERVER_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(request_data)
+    }).then(response => response.json())
+        .then((data) => {
+            if (data.status_code == 401) {
+                errorText.innerHTML = data.status_text
+            }
+            openDB(data.data)
+        }).catch((error) => {
+            errorText.value = error
+        })
 
-    request.onerror = function (event) {
+}
+function openDB(contents) {
+    const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
+
+    IndexedDB.onerror = function (event) {
         console.error("Database error:", event.target.errorCode);
     };
 
-    request.onsuccess = function (event) {
-        db = event.target.result;
-       
-                data.map((content) => {
-                    saveFileFromUrl(content)  
+    IndexedDB.onupgradeneeded = function (event) {
+        const db = event.target.result;
+        console.log("Upgrade needed. Current object store names:", db.objectStoreNames);
 
-                })
-    };
-
-    request.onupgradeneeded = function (event) {
-        db = event.target.result;
-        const objectStore = db.createObjectStore("files", { keyPath: "id", autoIncrement: true });
-        objectStore.createIndex("fileName", "fileName", { unique: false });
-        // console.log("Object store created successfully");
-    };
-}
-function saveFileFromUrl(contentData) {
-    const contentUrl = contentData.content_url;
-    console.log(contentUrl)
-    const fileName = contentUrl.split('/').pop(); // Extract filename from URL
-
-    fetch(contentUrl)
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            return response.blob(); // Convert the response to a Blob
-        })
-        .then(blob => {
-            const transaction = db.transaction(["files"], "readwrite");
-            const objectStore = transaction.objectStore("files");
-            const file = new File([blob], fileName, { type: blob.type });
-            console.log(file)
-
-            const fileData = {
-                fileName: fileName,
-                fileContent: blob, // Store the downloaded Blob content
-                mirrorId: contentData.mirror_id,
-                isActive: contentData.is_active,
-                order: contentData.order
-            };
-
-            const request = objectStore.add(fileData);
-
-            request.onsuccess = function (event) {
-                loadFiles(); // Reload files and preload them
-            };
-
-            request.onerror = function (event) {
-            };
-        })
-        .catch(error => {
-            console.error("Error downloading file:", error);
-        });
-}
-function loadFiles() {
-    files = []; // Clear the existing list
-    const transaction = db.transaction(["files"], "readonly");
-    const objectStore = transaction.objectStore("files");
-
-    // console.log(objectStore)
-
-    objectStore.openCursor().onsuccess = function (event) {
-        const cursor = event.target.result;
-
-        if (cursor) {
-            // if (cursor.value.fileContent.type.startsWith('image/')) {
-                console.log(cursor.value)
-            files.push(cursor.value.fileContent);
-            // }
-            cursor.continue();
-        } else {
-            preloadFiles(); // Preload files before starting the slideshow
+        // Create the object store if it doesn't exist
+        if (!db.objectStoreNames.contains("contents")) {
+            const objectStore = db.createObjectStore("contents", { keyPath: "id", autoIncrement: true });
+            objectStore.createIndex("fileName", "fileName", { unique: true });
+            console.log("Object store 'contents' created.");
         }
     };
+
+    IndexedDB.onsuccess = function (event) {
+        const db = event.target.result;
+        console.log("Database opened successfully:", db);
+
+        // Download and store files
+        const downloadPromises = contents.map(content => {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(["contents"], "readwrite");
+                const table_contents = transaction.objectStore("contents");
+                const fileName = content.content_url.split('/').pop(); // Extract filename from URL
+
+                fetch(content.content_url)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`Error fetching content: ${response.status}`);
+                        }
+                        return response.blob(); // Convert the response to a Blob
+                    })
+                    .then(blob => {
+                        const fileData = {
+                            fileName: fileName,
+                            fileContent: blob
+                        };
+                        const request = table_contents.add(fileData);
+                        request.onsuccess = () => {
+                            console.log(`File ${fileName} added successfully.`);
+                            resolve(); // Resolve the promise
+                        };
+                        request.onerror = () => {
+                            reject(new Error(`Error adding ${fileName} to database.`));
+                        };
+                    })
+                    .catch(error => {
+                        console.error("Error downloading file:", error);
+                        reject(error); // Reject the promise on fetch error
+                    });
+            });
+        });
+
+        // Wait for all downloads and additions to complete
+        Promise.all(downloadPromises)
+            .then(() => {
+                console.log('All content downloaded and stored successfully!');
+                // Optionally call loadFiles() here to fetch the stored files
+            })
+            .catch(error => {
+                console.error('Error storing files:', error);
+            });
+    };
 }
-function preloadFiles() {
+
+// Example usage
+// openDB([{ content_url: 'your_file_url_1' }, { content_url: 'your_file_url_2' }]);
+function openDB(contents) {
+    const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
+
+    IndexedDB.onerror = function (event) {
+        console.error("Database error:", event.target.errorCode);
+    };
+
+    IndexedDB.onupgradeneeded = function (event) {
+        const db = event.target.result;
+        console.log("Upgrade needed. Current object store names:", db.objectStoreNames);
+
+        // Create the object store if it doesn't exist
+        if (!db.objectStoreNames.contains("contents")) {
+            const objectStore = db.createObjectStore("contents", { keyPath: "id", autoIncrement: true });
+            objectStore.createIndex("Index", "fileName", { unique: true });
+            console.log("Object store 'contents' created.");
+        }
+    };
+
+    IndexedDB.onsuccess = function (event) {
+        let temp_contents = []
+        const db = event.target.result;
+        const transaction = db.transaction(["contents"], "readwrite");
+        const transaction_object = transaction.objectStore("contents");// Adding an object
+        const downloadPromises = contents.map(content => {
+            return new Promise((resolve, reject) => {
+                const fileName = content.content_url.split('/').pop(); // Extract filename from URL
+                try {
+                    fetch(content.content_url)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`Error fetching content: ${response.status}`);
+                        }
+                        return response.blob().then(fileContent => {
+                            return { fileName, fileContent };
+                          });
+                    }).then(({fileName, fileContent})=>{
+                        temp_contents.push(fileContent)
+                        const transaction = db.transaction(["contents"], "readwrite");
+                        const transaction_object = transaction.objectStore("contents");
+                        transaction_object.add({fileName,fileContent})
+                        resolve(); // Resolve the promise
+                    })
+                    .catch(error => {
+                        reject(error); // Reject the promise on fetch error
+                    });
+                }
+                catch{
+                    console.log('here',error)
+                    reject('No Network')
+                }
+            });
+        });
+        // Wait for all downloads and additions to complete
+        Promise.all(downloadPromises)
+            .then(() => {
+                console.log('All content downloaded and stored successfully!');
+                const transaction = db.transaction(["contents"], "readwrite");
+                const transaction_object = transaction.objectStore("contents");
+                transaction_object.openCursor().onsuccess = function (event) {
+                    const cursor = event.target.result;
+                    if (cursor) {
+                        files.push(cursor.value.fileContent);
+                        cursor.continue();
+                    }
+                };
+                loadFiles(temp_contents)
+            })
+            .catch(error => {
+                console.error(error);
+            });
+
+    }
+}
+
+
+
+function loadFiles(files) {
     const ContentPromise = [];
-    // console.log(files)
     files.forEach(file => {
 
-        // console.log(file.type)
 
         if (file.type === 'video/mp4') {
-
             const fileReader = new FileReader();
             const filePromise = new Promise((resolve, reject) => {
                 fileReader.onload = function (e) {
@@ -135,13 +229,17 @@ function preloadFiles() {
                     video.style.margin = "0";
                     video.style.padding = "0";
                     video.preload = "auto";
-                    ContentElement.push(video) // Load video content
+                    ContentElement.push(video) 
+                    resolve()// Load video content
                 };
                 fileReader.onerror = function (e) {
                     reject(e);
                 };
                 fileReader.readAsDataURL(file);
-            });
+
+            }).catch((error)=>{
+                console.log(error)
+            })
 
             ContentPromise.push(filePromise);
         }
@@ -167,23 +265,24 @@ function preloadFiles() {
 
             ContentPromise.push(filePromise);
         }
+       
     });
 
-    Promise.all(ContentPromise).then(() => {
-        showStartButton()
-        // startSlideshow(); // Start the slideshow after preloading all files
-    });
+    Promise.all(ContentPromise).then((res) => {
+
+        console.log('contentElement',ContentElement)
+        const startbutton = document.getElementById('startButton')
+        const loadingText = document.getElementById('loadingText')
+        startbutton.style.display = "flex";
+        loadingText.style.display = "none";
+    }).catch((error)=>{
+        console.log(error)
+    })
 }
-function showStartButton() {
-    const startbutton = document.getElementById('startButton')
-    const loadingText = document.getElementById('loadingText')
-    startbutton.style.display = "flex";
-    loadingText.style.display = "none";
-}
+
+
 function startSlideshow() {
     const slideshowContainer = document.getElementById('slideshowContainer');
-    // slideshowContainer.style.width = "100%"
-    // slideshowContainer.style.height = "100%"
     if (files.length === 0) {
         slideshowContainer.innerHTML = '<p>No files uploaded yet.</p>';
         return;
@@ -191,119 +290,34 @@ function startSlideshow() {
     currentIndex = 0;
     showCurrentFile();
 }
+
 async function showCurrentFile() {
     const slideshowContainer = document.getElementById('slideshowContainer');
     const login_container = document.getElementById('login_container');
     slideshowContainer.innerHTML = ''; // Clear the current display
-    login_container.style.display = 'none'; // Clear the current display
-    // console.log(ContentElement)
-    // console.log(currentIndex)
+    login_container.style.display = 'none'; 
     const content = ContentElement[currentIndex];
-    // console.log(content.tagName)
     if (content.tagName == "VIDEO") {
-
-        // Make sure user has interacted with the page
         content.play().then(() => {
             content.onended = function () {
-
                 showCurrentFile();
             };
         }).catch(error => {
             console.error("Failed to play video:", error);
         });
         slideshowContainer.appendChild(content);
-
-        // Delay of 2 seconds between images
     }
     else {
-
         setTimeout(() => {
             showCurrentFile(); // Call the function after a delay
         }, 4000);
-        // showCurrentFile();
         slideshowContainer.appendChild(content);
-
-
     }
-    // console.log("index",currentIndex)
-
-    // console.log(ContentElement.length)
     currentIndex = currentIndex + 1
-
-    if (ContentElement.length === currentIndex) {
-        // console.log('reset')
+    if (ContentElement.length === currentIndex){
         currentIndex = 0;
-        await loadFiles()
+        loadFiles()
     }
-
 
 }
-function Login(e) {
-    e.preventDefault();
 
-    // Get input values
-    const username = document.getElementById("username").value;
-    const password = document.getElementById("password").value;
-    const errorText = document.getElementById("error");
-
-    // Basic validation
-    if (username === "" || password === "") {
-        alert("Both fields are required.");
-        return;
-    }
-
-    let request_data = {
-        'username':username,
-        'password':password,
-        'service':'login'
-    }
-
-    // Handle login logic (e.g., send credentials to server)
-    // console.log("Logging in with:", { username, password });
-
-    // You can use fetch or another method to send this data to your server
-    fetch(SERVER_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(request_data)
-    }).then(response => response.json())
-        .then((data) => {
-            // openDB(data.key);
-            if (data.status_code == 401) {
-
-                errorText.innerHTML = data.status_text
-            }
-            // key = data.ws_secret_key;
-            console.log(data)
-            // document.cookie = `sockect_key=${key}`
-            // window.location = 'index.html'
-
-            openDB(data.data)
-        }).catch((error) => {
-            errorText.value = error
-        })
-
-}
-window.onbeforeunload = function () {
-    // Close the database first (optional but recommended)
-    if (db) {
-        db.close();
-    }
-
-    // Delete the database
-    const request = indexedDB.deleteDatabase("fileDatabase");
-
-    request.onsuccess = function () {
-        // console.log("Database deleted successfully.");
-    };
-
-    request.onerror = function (event) {
-        // console.error("Error deleting database:", event.target.errorCode);
-    };
-
-    request.onblocked = function () {
-        // console.log("Database deletion is blocked.");
-    };
-};
