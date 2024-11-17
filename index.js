@@ -39,6 +39,7 @@ function Login(e) {
         'password': password,
         'service': 'login'
     }
+
     fetch(SERVER_URL, {
         method: 'POST',
         headers: {
@@ -51,14 +52,17 @@ function Login(e) {
                 errorText.innerHTML = data.status_text
             }
             openDB(data.data)
+    // console.log("here",data.data)
+
         }).catch((error) => {
             errorText.value = error
         })
 
 }
 function openDB(contents) {
-    const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
+    document.getElementById('downloding').innerText= 'Downloading the contents please wait...'
 
+    const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
     IndexedDB.onerror = function (event) {
         console.error("Database error:", event.target.errorCode);
     };
@@ -321,3 +325,16 @@ async function showCurrentFile() {
 
 }
 
+// index.js
+// if ('serviceWorker' in navigator) {
+//     window.addEventListener('load', () => {
+//       navigator.serviceWorker.register('service-worker.js') // Path to your service worker file
+//         .then(registration => {
+//           console.log('Service Worker registered with scope:', registration.scope);
+//         })
+//         .catch(error => {
+//           console.error('Service Worker registration failed:', error);
+//         });
+//     });
+//   }
+  
