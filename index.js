@@ -224,14 +224,14 @@ function loadFiles(files) {
                     video.controls = false; // Hide controls
                     video.loop = false;
 
-                    // Ensure the video fills the viewport without extra space
-                    video.style.width = "100vw";
-                    video.style.height = "100vh";
-                    video.style.position = "absolute"; // Use absolute positioning if necessary
-                    video.style.top = "0";
-                    video.style.left = "0";
-                    video.style.margin = "0";
-                    video.style.padding = "0";
+                    video.style.width = "100vw"; // Full width of the viewport
+                    video.style.height = "100vh"; // Full height of the viewport
+                    video.style.objectFit = "cover"; // Ensures the video scales to fill while maintaining aspect ratio
+                    video.style.position = "fixed"; // Ensures it stays in place
+                    video.style.top = "0"; // Align to top
+                    video.style.left = "0"; // Align to left
+                    video.style.zIndex = "-1"; // Sends the video to the background, behind other content
+                    document.body.style.overflow = "hidden"; // Prevent scrolling
                     video.preload = "auto";
                     ContentElement.push(video) 
                     resolve()// Load video content

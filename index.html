@@ -19,11 +19,10 @@
             cursor: pointer;
             /* color: rgb(118, 13, 13); */
         }
-    #downloading{
-        display: block;
-    }
 
-
+        #downloading {
+            display: block;
+        }
     </style>
 </head>
 
@@ -33,32 +32,32 @@
     <div id="slideshowContainer"></div>
     <div id="login_container">
         <div id="container" style="background-color: white;">
-            <h1>MirrorLink</h1>
-            <p style="color: rgb(128, 128, 128);">MirrorLink is a Solution for Managing your big Screen Contents in an
+            <h1 style="color: rgb(212, 117, 212);">MirrorLink</h1>
+            <p style="color: rgb(122, 82, 116);">MirrorLink is a Solution for Managing your big Screen Contents in an
                 easy way using your smartphone. </p>
-            <ul style="color: rgb(128, 128, 128);">
+            <ol style="color: rgb(140, 86, 129);margin-top:10px; padding: 30px;">
                 <li>Download MirrorLink App from Playstore or Appstore</li>
                 <li>Log in to your MirrorLink Account</li>
                 <li>Add Your sites, mirrors into it.</li>
                 <li>Upload your contents to each mirrors as you like</li>
-            </ul>
+            </ol>
             <!-- <input type="file" id="fileInput">
         <button onclick="saveFile()">Save File to IndexedDB</button> -->
 
             <div style="display: flex;justify-content: right;">
                 <button onclick="startSlideshow()" id="startButton"
-                    style="display: none;padding: 10px 20px;background-color: rgb(22, 105, 213);font-weight: 300;border-radius: 5px;border:0px;">Start</button>
+                    style="display: none;padding: 10px 20px;background-color: rgb(172, 14, 159);font-weight: 300;border-radius: 5px;border:0px;">Start</button>
                 <!-- <p >Loading Contents Please Wait...</p> -->
             </div>
-            <form onsubmit="Login(event)" id="loadingText" >
-                <p style="margin: 10px;font-size: small;color: red;font-weight: bold;" id="error"></p>
+            <form onsubmit="Login(event)" id="loadingText">
+                <p style="font-size: small;color: red;font-weight: bold;" id="error"></p>
                 <div style="margin: 5px;">
                     <label for="username" class="label">Username</label><br />
                     <input type="text" id="username" name="username" required class="inputbox" />
 
                 </div>
                 <div style="margin: 5px;">
-                    <label for="password" class="label">Password</label><br />
+                    <label for="password" class="label" >Password</label><br />
                     <input type="password" id="password" name="password" required class="inputbox" />
 
                 </div>
@@ -68,7 +67,7 @@
                 </div>
             </form>
 
-            <p style="display: none;"  id="downloding">lkdfjklasdf</p>
+            <p style="display: none;" id="downloding">downloding</p>
         </div>
 
     </div>
