@@ -4,7 +4,7 @@ let currentIndex = 0;
 let ContentElement = [];
 let key = "";
 
-const IS_REMOTE_SERVER = false
+const IS_REMOTE_SERVER = true
 
 let SERVER_URL;
 let SERVER_WEBSOCKET_URL;
@@ -23,12 +23,18 @@ else {
     SERVER_WEBSOCKET_URL = CONTROLLER_WEBSOCKET_LOCAL_URL
 }
 function Login(e) {
+    console.log("Trying to Login and fetch content urls")
     e.preventDefault();
 
     // Get input values
     const username = document.getElementById("username").value;
     const password = document.getElementById("password").value;
     const errorText = document.getElementById("error");
+    const loading_button = document.getElementById("loading_button");
+    const login_button = document.getElementById("login_button");
+
+    loading_button.style.display = 'flex'
+    login_button.style.display = 'none'
     // Basic validation
     if (username === "" || password === "") {
         alert("Both fields are required.");
@@ -40,99 +46,120 @@ function Login(e) {
         'service': 'login'
     }
 
-    fetch(SERVER_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(request_data)
-    }).then(response => response.json())
-        .then((data) => {
-            if (data.status_code == 401) {
-                errorText.innerHTML = data.status_text
-            }
-            openDB(data.data)
-    // console.log("here",data.data)
+    try{
+        fetch(SERVER_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(request_data)
+        }).then(response => response.json())
+            .then((data) => {
+                if (data.status_code == 401) {
+                    errorText.innerHTML = data.status_text
+                }
+                console.log("Content Urls fetched successfully ")
 
-        }).catch((error) => {
-            errorText.value = error
-        })
-
-}
-function openDB(contents) {
-    document.getElementById('downloding').innerText= 'Downloading the contents please wait...'
-
-    const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
-    IndexedDB.onerror = function (event) {
-        console.error("Database error:", event.target.errorCode);
-    };
-
-    IndexedDB.onupgradeneeded = function (event) {
-        const db = event.target.result;
-        console.log("Upgrade needed. Current object store names:", db.objectStoreNames);
-
-        // Create the object store if it doesn't exist
-        if (!db.objectStoreNames.contains("contents")) {
-            const objectStore = db.createObjectStore("contents", { keyPath: "id", autoIncrement: true });
-            objectStore.createIndex("fileName", "fileName", { unique: true });
-            console.log("Object store 'contents' created.");
-        }
-    };
-
-    IndexedDB.onsuccess = function (event) {
-        const db = event.target.result;
-        console.log("Database opened successfully:", db);
-
-        // Download and store files
-        const downloadPromises = contents.map(content => {
-            return new Promise((resolve, reject) => {
-                const transaction = db.transaction(["contents"], "readwrite");
-                const table_contents = transaction.objectStore("contents");
-                const fileName = content.content_url.split('/').pop(); // Extract filename from URL
-
-                fetch(content.content_url)
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error(`Error fetching content: ${response.status}`);
-                        }
-                        return response.blob(); // Convert the response to a Blob
-                    })
-                    .then(blob => {
-                        const fileData = {
-                            fileName: fileName,
-                            fileContent: blob
-                        };
-                        const request = table_contents.add(fileData);
-                        request.onsuccess = () => {
-                            console.log(`File ${fileName} added successfully.`);
-                            resolve(); // Resolve the promise
-                        };
-                        request.onerror = () => {
-                            reject(new Error(`Error adding ${fileName} to database.`));
-                        };
-                    })
-                    .catch(error => {
-                        console.error("Error downloading file:", error);
-                        reject(error); // Reject the promise on fetch error
-                    });
-            });
-        });
-
-        // Wait for all downloads and additions to complete
-        Promise.all(downloadPromises)
-            .then(() => {
-                console.log('All content downloaded and stored successfully!');
-                // Optionally call loadFiles() here to fetch the stored files
+                openDB(data.data)
+    
+            }).catch((error) => {
+                errorText.innerText = error
+                loading_button.style.display = 'none'
+                login_button.style.display = 'flex'
             })
-            .catch(error => {
-                console.error('Error storing files:', error);
-            });
-    };
+    }
+    catch(err){
+        console.log("Error in Fetching Content",err)
+    }
 }
+
+// function openDB(contents) {
+//     console.log("Downloading the Your Contents...")
+//     document.getElementById('downloding').innerText= 'Downloading the contents please wait...'
+
+//     const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
+//     IndexedDB.onerror = function (event) {
+//         console.error("Database error:", event.target.errorCode);
+//     };
+
+//     IndexedDB.onupgradeneeded = function (event) {
+//         const db = event.target.result;
+//         console.log("Upgrade needed. Current object store names:", db.objectStoreNames);
+
+//         // Create the object store if it doesn't exist
+//         if (!db.objectStoreNames.contains("contents")) {
+//             const objectStore = db.createObjectStore("contents", { keyPath: "id", autoIncrement: true });
+//             objectStore.createIndex("fileName", "fileName", { unique: true });
+//             console.log("Object store 'contents' created.");
+//         }
+//     };
+
+//     IndexedDB.onsuccess = function (event) {
+//         const db = event.target.result;
+//         console.log("Database opened successfully");
+
+//         // Download and store files
+//         const downloadPromises = contents.map(content => {
+//             return new Promise((resolve, reject) => {
+//                 const transaction = db.transaction(["contents"], "readwrite");
+//                 const table_contents = transaction.objectStore("contents");
+//                 const fileName = content.content_url.split('/').pop(); // Extract filename from URL
+
+//                 console.log("Downloading Content from Url")
+//                 try{
+//                     fetch(content.content_url)
+//                     .then(response => {
+//                         if (!response.ok) {
+//                             throw new Error(`Error fetching content: ${response.status}`);
+//                         }
+//                         return response.blob(); // Convert the response to a Blob
+//                     })
+//                     .then(blob => {
+//                         const fileData = {
+//                             fileName: fileName,
+//                             fileContent: blob
+//                         };
+//                         const request = table_contents.add(fileData);
+//                         request.onsuccess = () => {
+//                             console.log(`File ${fileName} added successfully.`);
+//                             resolve(); // Resolve the promise
+//                         };
+//                         request.onerror = () => {
+//                             reject(new Error(`Error adding ${fileName} to database.`));
+//                         };
+//                     })
+//                     .catch(error => {
+//                         console.error("Error downloading file:", error);
+//                         reject(error); // Reject the promise on fetch error
+//                     });
+//                 }
+//                 catch(err){
+//                     console.log("Not able to download the content from urls", err)
+//                 }
+              
+//             });
+//         });
+
+//         // Wait for all downloads and additions to complete
+//         Promise.all(downloadPromises)
+//             .then((res) => {
+//                 console.log('All content downloaded and stored successfully!');
+//                 // Optionally call loadFiles() here to fetch the stored files
+//                 loadFiles()
+//             })
+//             .catch(error => {
+//                 console.error('Error storing files:', error);
+//             });
+//     };
+// }
 
 // Example usage
 // openDB([{ content_url: 'your_file_url_1' }, { content_url: 'your_file_url_2' }]);
+
+
 function openDB(contents) {
+    console.log("Downloading the Your Contents...")
+
     const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
 
     IndexedDB.onerror = function (event) {
@@ -210,6 +237,7 @@ function openDB(contents) {
 
 
 function loadFiles(files) {
+    console.log('loading Downloaded files. Please Wait...')
     const ContentPromise = [];
     files.forEach(file => {
 

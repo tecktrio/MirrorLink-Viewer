@@ -4,7 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="logo.png" type="image/png">
+    <link rel="icon" href="logo.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500&display=swap" rel="stylesheet" />>
     <link rel="stylesheet" href="index.css" />
     <title>MirrorLink Mirror</title>
     <style>
@@ -26,44 +29,38 @@
     </style>
 </head>
 
-<body>
+<body style="font-family: Poppins;">
 
 
     <div id="slideshowContainer"></div>
     <div id="login_container">
         <div id="container" style="background-color: white;">
-            <h1 style="color: rgb(212, 117, 212);">MirrorLink</h1>
+
+            <h1 style="color: rgb(212, 117, 212);padding: 0px;margin: 0px;">mStreamer</h1>
             <p style="color: rgb(122, 82, 116);">MirrorLink is a Solution for Managing your big Screen Contents in an
                 easy way using your smartphone. </p>
-            <ol style="color: rgb(140, 86, 129);margin-top:10px; padding: 30px;">
-                <li>Download MirrorLink App from Playstore or Appstore</li>
-                <li>Log in to your MirrorLink Account</li>
-                <li>Add Your sites, mirrors into it.</li>
-                <li>Upload your contents to each mirrors as you like</li>
-            </ol>
-            <!-- <input type="file" id="fileInput">
-        <button onclick="saveFile()">Save File to IndexedDB</button> -->
 
             <div style="display: flex;justify-content: right;">
                 <button onclick="startSlideshow()" id="startButton"
                     style="display: none;padding: 10px 20px;background-color: rgb(172, 14, 159);font-weight: 300;border-radius: 5px;border:0px;">Start</button>
-                <!-- <p >Loading Contents Please Wait...</p> -->
             </div>
+
             <form onsubmit="Login(event)" id="loadingText">
-                <p style="font-size: small;color: red;font-weight: bold;" id="error"></p>
-                <div style="margin: 5px;">
-                    <label for="username" class="label">Username</label><br />
+                <p style="color: red;font-weight: bold;" id="error"></p>
+                <div >
+                    <label for="username" class="label">Username</label>
                     <input type="text" id="username" name="username" required class="inputbox" />
 
                 </div>
-                <div style="margin: 5px;">
-                    <label for="password" class="label" >Password</label><br />
+                <div >
+                    <label for="password" class="label">Password</label>
                     <input type="password" id="password" name="password" required class="inputbox" />
 
                 </div>
 
-                <div style="display: flex;justify-content: end;">
-                    <button type="submit" class="login_button">Login</button>
+                <div >
+                    <button type="submit" class="login_button"  style="display: flex; justify-content: center;" id="login_button">Login</button>
+                    <button type="submit" class="login_button" style="display: none; justify-content: center;" id="loading_button" >Loading...</button>
                 </div>
             </form>
 
