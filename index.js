@@ -235,84 +235,94 @@ function openDB(contents) {
 }
 
 
-
+// Adjustments to video handling for Safari and Chrome compatibility
 function loadFiles(files) {
-    console.log('loading Downloaded files. Please Wait...')
+    console.log('loading Downloaded files. Please Wait...');
     const ContentPromise = [];
     files.forEach(file => {
-
-
         if (file.type === 'video/mp4') {
             const fileReader = new FileReader();
             const filePromise = new Promise((resolve, reject) => {
                 fileReader.onload = function (e) {
                     const url = e.target.result;
                     const video = document.createElement('video');
-                    video.src = url;
-                    video.controls = false; // Hide controls
+                    video.src = url;  // Use blob URL for video file source
+                    video.controls = false;  // Hide controls
                     video.loop = false;
 
-                    video.style.width = "100vw"; // Full width of the viewport
-                    video.style.height = "100vh"; // Full height of the viewport
-                    video.style.objectFit = "cover"; // Ensures the video scales to fill while maintaining aspect ratio
-                    video.style.position = "fixed"; // Ensures it stays in place
-                    video.style.top = "0"; // Align to top
-                    video.style.left = "0"; // Align to left
-                    video.style.zIndex = "-1"; // Sends the video to the background, behind other content
-                    document.body.style.overflow = "hidden"; // Prevent scrolling
+                    // Set video style for Chrome and Safari compatibility
+                    video.style.position = "fixed";  // Fixed positioning for full-screen view
+                    video.style.top = "0";  // Align to top
+                    video.style.left = "0";  // Align to left
+                    video.style.width = "100%";  // Full width
+                    video.style.height = "100%";  // Full height
+                    video.style.objectFit = "cover";  // Ensure the video covers the screen
+
+                    // Ensure proper handling of autoplay on both browsers (Safari needs interaction)
                     video.preload = "auto";
-                    ContentElement.push(video) 
-                    resolve()// Load video content
+                    video.muted = true;  // Mute video to allow autoplay on Safari
+
+                    // For Safari, autoplay is only allowed after user interaction
+                    const promise = video.play();
+                    if (promise !== undefined) {
+                        promise.then(() => {
+                            console.log('Video autoplay started');
+                        }).catch(error => {
+                            console.log('Autoplay prevented in Safari, user interaction required');
+                            // You can handle user interaction logic if needed
+                        });
+                    }
+
+                    ContentElement.push(video);  // Push video to content array
+                    resolve();  // Resolve after loading the video
                 };
+
                 fileReader.onerror = function (e) {
                     reject(e);
                 };
-                fileReader.readAsDataURL(file);
-
-            }).catch((error)=>{
-                console.log(error)
-            })
+                fileReader.readAsDataURL(file);  // Read the file as a data URL
+            }).catch((error) => {
+                console.log(error);
+            });
 
             ContentPromise.push(filePromise);
-        }
-
-        else {
+        } else {
+            // Handling for images
             const fileReader = new FileReader();
             const filePromise = new Promise((resolve, reject) => {
                 fileReader.onload = function (e) {
                     const url = e.target.result;
                     const img = document.createElement('img');
                     img.src = url;
-                    // img.style.maxWidth = '100%';
-                    img.style.height = '100vh';
-                    img.style.width = "100vw";
-                    ContentElement.push(img);
+                    img.style.height = '100vh';  // Full height
+                    img.style.width = "100vw";  // Full width
+                    img.style.objectFit = "cover";  // Cover the entire screen
+                    ContentElement.push(img);  // Push image to content array
                     resolve();
                 };
                 fileReader.onerror = function (e) {
                     reject(e);
                 };
-                fileReader.readAsDataURL(file);
+                fileReader.readAsDataURL(file);  // Read the file as a data URL
             });
 
             ContentPromise.push(filePromise);
         }
-       
     });
 
-    Promise.all(ContentPromise).then((res) => {
-
-        console.log('contentElement',ContentElement)
-        const startbutton = document.getElementById('startButton')
-        const loadingText = document.getElementById('loadingText')
-        startbutton.style.display = "flex";
-        loadingText.style.display = "none";
-    }).catch((error)=>{
-        console.log(error)
-    })
+    // Wait for all content to be loaded before showing the start button
+    Promise.all(ContentPromise).then(() => {
+        console.log('contentElement', ContentElement);
+        const startbutton = document.getElementById('startButton');
+        const loadingText = document.getElementById('loadingText');
+        startbutton.style.display = "flex";  // Show start button
+        loadingText.style.display = "none";  // Hide loading text
+    }).catch((error) => {
+        console.log(error);
+    });
 }
 
-
+// Function to start the slideshow of content
 function startSlideshow() {
     const slideshowContainer = document.getElementById('slideshowContainer');
     if (files.length === 0) {
@@ -323,46 +333,36 @@ function startSlideshow() {
     showCurrentFile();
 }
 
+// Function to display the current file in the slideshow
 async function showCurrentFile() {
     const slideshowContainer = document.getElementById('slideshowContainer');
     const login_container = document.getElementById('login_container');
-    slideshowContainer.innerHTML = ''; // Clear the current display
-    login_container.style.display = 'none'; 
+    slideshowContainer.innerHTML = '';  // Clear the current display
+    login_container.style.display = 'none';  // Hide the login container
     const content = ContentElement[currentIndex];
-    if (content.tagName == "VIDEO") {
-        content.play().then(() => {
-            content.onended = function () {
-                showCurrentFile();
+
+    if (content.tagName === "VIDEO") {  // Handle video playback
+        const video = content;
+        // Play video if possible (Chrome & Safari)
+        video.play().then(() => {
+            console.log('Video is playing');
+            video.onended = function () {
+                showCurrentFile();  // Move to the next content when video ends
             };
         }).catch(error => {
             console.error("Failed to play video:", error);
         });
-        slideshowContainer.appendChild(content);
-    }
-    else {
+
+        slideshowContainer.appendChild(content);  // Append the video element to container
+    } else {  // Handle image display
         setTimeout(() => {
-            showCurrentFile(); // Call the function after a delay
-        }, 4000);
-        slideshowContainer.appendChild(content);
+            showCurrentFile();  // Call the function after a delay (for the next image)
+        }, 4000);  // Delay between images
+        slideshowContainer.appendChild(content);  // Append the image element to container
     }
-    currentIndex = currentIndex + 1
-    if (ContentElement.length === currentIndex){
+    currentIndex += 1;
+    if (ContentElement.length === currentIndex) {  // If all files are shown, reset index
         currentIndex = 0;
-        loadFiles()
+        loadFiles();  // Reload files if needed
     }
-
 }
-
-// index.js
-// if ('serviceWorker' in navigator) {
-//     window.addEventListener('load', () => {
-//       navigator.serviceWorker.register('service-worker.js') // Path to your service worker file
-//         .then(registration => {
-//           console.log('Service Worker registered with scope:', registration.scope);
-//         })
-//         .catch(error => {
-//           console.error('Service Worker registration failed:', error);
-//         });
-//     });
-//   }
-  
