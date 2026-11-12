@@ -4,6 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#07090e" />
     <link rel="icon" href="logo.png" type="image/png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -55,31 +59,23 @@
                 <div id="error" class="error-banner" style="display: none;"></div>
 
                 <div class="form-group">
-                    <label for="username" class="label">Screen ID / Username</label>
+                    <label for="mirror_name" class="label">Mirror Name</label>
                     <div class="input-wrapper">
                         <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
                             <line x1="8" y1="21" x2="16" y2="21"></line>
                             <line x1="12" y1="17" x2="12" y2="21"></line>
                         </svg>
-                        <input type="text" id="username" name="username" placeholder="e.g. lobby_mirror_1" required class="inputbox" autocomplete="username" />
+                        <input type="text" id="mirror_name" name="mirror_name" placeholder="e.g. Lobby Display" required class="inputbox" autocomplete="off" autofocus />
                     </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="password" class="label">Access Key / Password</label>
-                    <div class="input-wrapper">
-                        <svg class="input-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                        </svg>
-                        <input type="password" id="password" name="password" placeholder="••••••••••••" required class="inputbox" autocomplete="current-password" />
-                    </div>
+                    <p style="font-size: 11px; color: #94a3b8; margin-top: 6px; margin-bottom: 0;">
+                        Enter the unique mirror name configured in MirrorLink.
+                    </p>
                 </div>
 
                 <div class="button-group">
                     <button type="submit" class="login_button" id="login_button">
-                        <span>Connect Display</span>
+                        <span>Connect &amp; Stream Display</span>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                             <line x1="5" y1="12" x2="19" y2="12"></line>
                             <polyline points="12 5 19 12 12 19"></polyline>
@@ -87,7 +83,7 @@
                     </button>
                     <button type="button" class="login_button loading_state" style="display: none;" id="loading_button" disabled>
                         <span class="spinner"></span>
-                        <span>Syncing Display Media...</span>
+                        <span id="sync_status_text">Syncing Display Media...</span>
                     </button>
                 </div>
             </form>

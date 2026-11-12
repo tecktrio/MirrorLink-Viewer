@@ -5,8 +5,7 @@ let initialServerIndex = 0;
 let ContentElement = [];
 let key = "";
 
-let savedUsername = "";
-let savedPassword = "";
+let savedMirrorName = "";
 let wsConnection = null;
 let slideshowTimer = null;
 let currentVideoElement = null;
@@ -19,72 +18,130 @@ let lastKnownSyncTimestamp = 0;
 let pollInterval = null;
 let mirrorPhotoDuration = 5;
 
-const IS_REMOTE_SERVER = false;
+const SERVER_URL = "https://mirrorlink.bigburry.com/api/Mirror";
+const SERVER_WEBSOCKET_URL = "wss://mirrorlink.bigburry.com/mirror?";
 
-let SERVER_URL;
-let SERVER_WEBSOCKET_URL;
-const SERVER_ROOT_REMOTE_URL = "https://mirrorlinkserver.developingkerala.com/Mirror";
-const SERVER_ROOT_LOCAL_URL = "http://127.0.0.1:8000/Mirror";
-const CONTROLLER_WEBSOCKET_REMOTE_URL = "wss://mirrorlinkserver.developingkerala.com/ws/mirror?";
-const CONTROLLER_WEBSOCKET_LOCAL_URL = "ws://127.0.0.1:8000/mirror?";
-
-if (IS_REMOTE_SERVER) {
-    SERVER_URL = SERVER_ROOT_REMOTE_URL;
-    SERVER_WEBSOCKET_URL = CONTROLLER_WEBSOCKET_REMOTE_URL;
-} else {
-    SERVER_URL = SERVER_ROOT_LOCAL_URL;
-    SERVER_WEBSOCKET_URL = CONTROLLER_WEBSOCKET_LOCAL_URL;
+function updateSyncProgress(msg) {
+    const syncStatusText = document.getElementById("sync_status_text");
+    if (syncStatusText) {
+        syncStatusText.textContent = msg;
+    }
 }
 
-// Restore saved credentials if available
-window.addEventListener('DOMContentLoaded', () => {
+function showStandbyScreen() {
+    const loadingText = document.getElementById('loadingText');
+    const startBanner = document.getElementById('startBanner');
+    const loginContainer = document.getElementById('login_container');
+    const slideshowContainer = document.getElementById('slideshowContainer');
+
+    if (slideshowContainer) slideshowContainer.style.display = "none";
+    if (loginContainer) loginContainer.style.display = "flex";
+    if (loadingText) loadingText.style.display = "none";
+    if (startBanner) {
+        startBanner.innerHTML = `
+            <div class="ready-badge" style="border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.1); color: #60a5fa;">
+                <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#38bdf8;box-shadow:0 0 8px #38bdf8;"></span>
+                <span>Connected to <strong>${savedMirrorName || "Mirror"}</strong></span>
+            </div>
+            <div style="margin-top: 14px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.5;">
+                <p style="margin: 0; color: #f1f5f9; font-weight: 600;">Display Standby Active</p>
+                <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">Awaiting media contents from MirrorLink setup.<br>Presentation starts automatically once media is assigned.</p>
+            </div>
+        `;
+        startBanner.style.display = 'block';
+    }
+}
+
+function showLoginDialog() {
+    const loginContainer = document.getElementById('login_container');
+    const loadingText = document.getElementById('loadingText');
+    const startBanner = document.getElementById('startBanner');
+    const loading_button = document.getElementById("loading_button");
+    const login_button = document.getElementById("login_button");
+    const slideshowContainer = document.getElementById('slideshowContainer');
+
+    if (slideshowContainer) slideshowContainer.style.display = 'none';
+    if (loginContainer) loginContainer.style.display = 'flex';
+    if (loadingText) loadingText.style.display = 'block';
+    if (startBanner) startBanner.style.display = 'none';
+    if (loading_button) loading_button.style.display = 'none';
+    if (login_button) login_button.style.display = 'flex';
+
+    const mInput = document.getElementById("mirror_name");
+    if (mInput) {
+        mInput.value = "";
+        mInput.focus();
+    }
+}
+
+// Auto-connect when mirror_name is present in URL, otherwise show login dialog
+function initAutoConnect() {
     try {
-        const saved = localStorage.getItem('mirror_saved_auth');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed.username && parsed.password) {
-                const uInput = document.getElementById("username");
-                const pInput = document.getElementById("password");
-                if (uInput && !uInput.value) uInput.value = parsed.username;
-                if (pInput && !pInput.value) pInput.value = parsed.password;
-            }
+        const urlParams = new URLSearchParams(window.location.search);
+        const queryMirrorName = urlParams.get('mirror_name') || urlParams.get('name');
+        
+        if (queryMirrorName && queryMirrorName.trim() !== '') {
+            const cleanName = queryMirrorName.trim();
+            console.log("Auto-connecting to mirror from URL parameter:", cleanName);
+            const mInput = document.getElementById("mirror_name");
+            if (mInput) mInput.value = cleanName;
+
+            const loading_button = document.getElementById("loading_button");
+            const login_button = document.getElementById("login_button");
+            if (loading_button) loading_button.style.display = 'flex';
+            if (login_button) login_button.style.display = 'none';
+            updateSyncProgress(`Connecting to ${cleanName}...`);
+
+            // Start immediately
+            Login();
+        } else {
+            console.log("No mirror_name in URL. Presenting mirror name dialog.");
+            showLoginDialog();
         }
     } catch (e) {
-        console.warn("Storage check:", e);
+        console.warn("Auto-connect notice:", e);
+        showLoginDialog();
     }
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAutoConnect);
+} else {
+    initAutoConnect();
+}
 
 function Login(e) {
-    console.log("Trying to Login and fetch content urls");
-    if (e && e.preventDefault) e.preventDefault();
+    console.log("Connecting mirror stream by name...");
+    if (e) {
+        if (e.preventDefault) e.preventDefault();
+        // User gesture detected: immediately request fullscreen
+        enterFullscreen();
+    }
 
-    const usernameInput = document.getElementById("username");
-    const passwordInput = document.getElementById("password");
-    const username = usernameInput ? usernameInput.value.trim() : "";
-    const password = passwordInput ? passwordInput.value.trim() : "";
+    const mirrorNameInput = document.getElementById("mirror_name");
+    const mirrorName = mirrorNameInput ? mirrorNameInput.value.trim() : "";
     const errorText = document.getElementById("error");
     const loading_button = document.getElementById("loading_button");
     const login_button = document.getElementById("login_button");
 
     if (loading_button) loading_button.style.display = 'flex';
     if (login_button) login_button.style.display = 'none';
+    updateSyncProgress(`Connecting to ${mirrorName}...`);
 
-    if (username === "" || password === "") {
-        alert("Both Screen ID and Access Key are required.");
+    if (!mirrorName) {
+        alert("Mirror Name is required.");
         if (loading_button) loading_button.style.display = 'none';
         if (login_button) login_button.style.display = 'flex';
         return;
     }
 
-    savedUsername = username;
-    savedPassword = password;
+    savedMirrorName = mirrorName;
     try {
-        localStorage.setItem('mirror_saved_auth', JSON.stringify({ username, password }));
+        localStorage.setItem('mirror_saved_name', mirrorName);
     } catch (err) {}
 
     let request_data = {
-        'username': username,
-        'password': password,
+        'mirror_name': mirrorName,
         'service': 'login'
     };
 
@@ -97,9 +154,9 @@ function Login(e) {
     })
     .then(response => response.json())
     .then((data) => {
-        if (data.status_code === 401 || data.status_code === 400) {
+        if (data.status_code === 401 || data.status_code === 400 || data.status_code === 404) {
             if (errorText) {
-                errorText.innerHTML = data.status_text || "Invalid Screen ID or Access Key";
+                errorText.innerHTML = data.status_text || `Mirror "${mirrorName}" not found. Check the mirror name.`;
                 errorText.style.display = 'block';
             }
             if (loading_button) loading_button.style.display = 'none';
@@ -107,11 +164,11 @@ function Login(e) {
             return;
         }
 
-        console.log("Content URLs fetched successfully for mirror display");
+        console.log(`Mirror stream "${mirrorName}" connected successfully.`);
         if (errorText) errorText.style.display = 'none';
 
         // Connect real-time WebSocket and polling fallback for remote refresh messages
-        connectWebSocket(username, password);
+        connectWebSocket(mirrorName);
         startPollingFallback();
 
         if (data.photo_duration) {
@@ -129,10 +186,28 @@ function Login(e) {
         if (data.playback_state === 'paused') {
             isPaused = true;
         }
-        openDB(rawContents);
+
+        rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
+        
+        if (rawContents.length === 0) {
+            console.log("No media assigned to this mirror yet.");
+            showStandbyScreen();
+            return;
+        }
+
+        console.log(`Loaded ${rawContents.length} media item(s). Starting presentation immediately.`);
+        ContentElement = createElementsFromContents(rawContents);
+        if (initialServerIndex !== undefined && ContentElement.length > 0) {
+            currentIndex = initialServerIndex % ContentElement.length;
+        } else {
+            currentIndex = 0;
+        }
+
+        // Start presentation immediately without waiting
+        startSlideshow();
     })
     .catch((error) => {
-        console.error("Login fetch error:", error);
+        console.error("Mirror connect error:", error);
         if (errorText) {
             errorText.innerText = "Network connection error: " + error.message;
             errorText.style.display = 'block';
@@ -142,7 +217,7 @@ function Login(e) {
     });
 }
 
-function connectWebSocket(username, password) {
+function connectWebSocket(mirrorName) {
     if (wsConnection) {
         try {
             wsConnection.onclose = null;
@@ -150,14 +225,14 @@ function connectWebSocket(username, password) {
         } catch (e) {}
     }
 
-    const wsUrl = `${SERVER_WEBSOCKET_URL}key=${encodeURIComponent(username + password)}&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
-    console.log("[Mirror WebSocket] Connecting to:", wsUrl);
+    const wsUrl = `${SERVER_WEBSOCKET_URL}mirror_name=${encodeURIComponent(mirrorName)}`;
+    console.log("[Mirror WebSocket] Connecting stream for:", mirrorName);
 
     try {
         wsConnection = new WebSocket(wsUrl);
 
         wsConnection.onopen = () => {
-            console.log("[Mirror WebSocket] Connected to MirrorLink Server successfully.");
+            console.log("[Mirror WebSocket] Connected to MirrorLink Server successfully for mirror:", mirrorName);
         };
 
         wsConnection.onmessage = (event) => {
@@ -225,8 +300,8 @@ function connectWebSocket(username, password) {
         wsConnection.onclose = () => {
             console.log("[Mirror WebSocket] Connection closed. Auto-reconnecting in 4 seconds...");
             setTimeout(() => {
-                if (savedUsername && savedPassword) {
-                    connectWebSocket(savedUsername, savedPassword);
+                if (savedMirrorName) {
+                    connectWebSocket(savedMirrorName);
                 }
             }, 4000);
         };
@@ -238,14 +313,13 @@ function connectWebSocket(username, password) {
 function startPollingFallback() {
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = setInterval(() => {
-        if (!savedUsername || !savedPassword || isReloading) return;
+        if (!savedMirrorName || isReloading) return;
 
         fetch(SERVER_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                username: savedUsername,
-                password: savedPassword,
+                mirror_name: savedMirrorName,
                 service: 'CheckMirrorUpdate'
             })
         })
@@ -300,6 +374,51 @@ function startPollingFallback() {
     }, 2500);
 }
 
+function createElementsFromContents(contents) {
+    if (!contents || !Array.isArray(contents)) return [];
+
+    return contents.map((item) => {
+        if (!item || !item.content_url) return null;
+        const url = item.content_url;
+        const isVideo = (item.content_format && item.content_format.toLowerCase().includes('video')) ||
+                        /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
+
+        if (isVideo) {
+            const video = document.createElement('video');
+            video.src = url;
+            video.controls = false;
+            video.loop = false;
+            video.autoplay = true;
+            video.muted = true;
+            video.playsInline = true;
+            video.setAttribute('playsinline', '');
+            video.setAttribute('webkit-playsinline', '');
+            video.style.width = "100vw";
+            video.style.height = "100vh";
+            video.style.objectFit = "cover";
+            video.style.position = "fixed";
+            video.style.top = "0";
+            video.style.left = "0";
+            video.style.zIndex = "10";
+            video.style.background = "#000";
+            video.preload = "auto";
+            return video;
+        } else {
+            const img = document.createElement('img');
+            img.src = url;
+            img.style.width = "100vw";
+            img.style.height = "100vh";
+            img.style.objectFit = "cover";
+            img.style.position = "fixed";
+            img.style.top = "0";
+            img.style.left = "0";
+            img.style.zIndex = "10";
+            img.style.background = "#000";
+            return img;
+        }
+    }).filter(Boolean);
+}
+
 function reloadMirrorContents(incomingContents) {
     if (isReloading) {
         console.log("Reload already in progress, skipping duplicate call...");
@@ -329,8 +448,7 @@ function reloadMirrorContents(incomingContents) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                username: savedUsername,
-                password: savedPassword,
+                mirror_name: savedMirrorName,
                 service: 'login'
             })
         })
@@ -342,240 +460,83 @@ function reloadMirrorContents(incomingContents) {
         });
 
     fetchFreshPromise.then(contents => {
-        console.log(`Fetched ${contents.length} fresh content item(s) for mirror.`);
-        rawContents = contents || [];
-        
-        // 3. Clear IndexedDB storage to flush removed files and save new ones
-        openDBForReload(contents)
-            .then(loadedElements => {
-                ContentElement = loadedElements;
-                if (initialServerIndex !== undefined && ContentElement.length > 0) {
-        currentIndex = initialServerIndex % ContentElement.length;
-    } else {
-        currentIndex = 0;
+        isReloading = false;
+        rawContents = (contents || []).filter(item => item && item.content_url && item.is_active !== false);
+        console.log(`Fetched ${rawContents.length} fresh content item(s) for mirror.`);
+
+        ContentElement = createElementsFromContents(rawContents);
+
+        const slideshowContainer = document.getElementById('slideshowContainer');
+        if (slideshowContainer) {
+            slideshowContainer.innerHTML = '';
+        }
+
+        // If mirror has content, immediately launch/refresh presentation
+        if (ContentElement.length > 0) {
+            if (initialServerIndex !== undefined && ContentElement.length > 0) {
+                currentIndex = initialServerIndex % ContentElement.length;
+            } else {
+                currentIndex = 0;
+            }
+            startSlideshow();
+        } else {
+            showStandbyScreen();
+        }
+    });
+}
+
+function checkFullscreenKioskPrompt() {
+    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+    let prompt = document.getElementById('kiosk-fullscreen-prompt');
+    if (isFs) {
+        if (prompt) prompt.remove();
+        return;
     }
-                isReloading = false;
-                console.log("New contents downloaded. Restarting slideshow now!");
+    if (!isSlideshowActive) return;
 
-                const slideshowContainer = document.getElementById('slideshowContainer');
-                if (slideshowContainer) {
-                    slideshowContainer.innerHTML = '';
-                }
-
-                // If mirror was already in slideshow mode or has content, immediately restart presentation
-                if (isSlideshowActive || ContentElement.length > 0) {
-                    isSlideshowActive = true;
-                    showCurrentFile();
-                } else {
-                    const startButton = document.getElementById('startButton');
-                    const startBanner = document.getElementById('startBanner');
-                    if (startButton) startButton.style.display = 'flex';
-                    if (startBanner) startBanner.style.display = 'block';
-                }
-            })
-            .catch(err => {
-                console.error("Error during content reload:", err);
-                isReloading = false;
-            });
-    });
-}
-
-function openDBForReload(contents) {
-    return new Promise((resolve) => {
-        const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
-        IndexedDB.onerror = function (e) {
-            console.error("DB error on reload:", e);
-            resolve([]);
-        };
-
-        IndexedDB.onsuccess = function (event) {
-            const dbInstance = event.target.result;
-            try {
-                const clearTx = dbInstance.transaction(["contents"], "readwrite");
-                const store = clearTx.objectStore("contents");
-                store.clear();
-            } catch (e) {
-                console.warn("Could not clear objectStore:", e);
-            }
-
-            if (!contents || contents.length === 0) {
-                resolve([]);
-                return;
-            }
-
-            const downloadPromises = contents.map(content => {
-                const fileName = content.content_url.split('/').pop();
-                return fetch(content.content_url)
-                    .then(response => {
-                        if (!response.ok) throw new Error("HTTP error " + response.status);
-                        return response.blob();
-                    })
-                    .then(fileContent => {
-                        try {
-                            const addTx = dbInstance.transaction(["contents"], "readwrite");
-                            addTx.objectStore("contents").add({ fileName, fileContent });
-                        } catch (err) {}
-                        return fileContent;
-                    })
-                    .catch(err => {
-                        console.warn("Could not download file:", content.content_url, err);
-                        return null;
-                    });
-            });
-
-            Promise.all(downloadPromises).then(blobs => {
-                const validBlobs = blobs.filter(b => b !== null);
-                createElementsFromBlobs(validBlobs).then(elements => {
-                    resolve(elements);
-                });
-            });
-        };
-    });
-}
-
-function createElementsFromBlobs(blobList) {
-    const promises = blobList.map(file => {
-        return new Promise((resolve) => {
-            const fileReader = new FileReader();
-            fileReader.onload = function (e) {
-                const url = e.target.result;
-                if (file.type && file.type.startsWith('video/')) {
-                    const video = document.createElement('video');
-                    video.src = url;
-                    video.controls = false;
-                    video.loop = false;
-                    video.autoplay = true;
-                    video.muted = true;
-                    video.playsInline = true;
-                    video.style.width = "100vw";
-                    video.style.height = "100vh";
-                    video.style.objectFit = "cover";
-                    video.style.position = "fixed";
-                    video.style.top = "0";
-                    video.style.left = "0";
-                    video.style.zIndex = "10";
-                    document.body.style.overflow = "hidden";
-                    video.preload = "auto";
-                    resolve(video);
-                } else {
-                    const img = document.createElement('img');
-                    img.src = url;
-                    img.style.height = '100vh';
-                    img.style.width = "100vw";
-                    img.style.objectFit = "cover";
-                    img.style.position = "fixed";
-                    img.style.top = "0";
-                    img.style.left = "0";
-                    img.style.zIndex = "10";
-                    resolve(img);
-                }
-            };
-            fileReader.onerror = function () {
-                resolve(null);
-            };
-            fileReader.readAsDataURL(file);
+    if (!prompt) {
+        prompt = document.createElement('div');
+        prompt.id = 'kiosk-fullscreen-prompt';
+        prompt.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:rgba(15,23,42,0.9);backdrop-filter:blur(12px);border:1px solid rgba(168,85,247,0.6);color:#f8fafc;padding:10px 22px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:600;letter-spacing:0.02em;display:flex;align-items:center;gap:10px;box-shadow:0 12px 32px rgba(0,0,0,0.6);cursor:pointer;user-select:none;transition:all 0.2s ease;";
+        prompt.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            <span>Tap / Click anywhere for Kiosk Full-Screen</span>
+        `;
+        prompt.addEventListener('click', (e) => {
+            e.stopPropagation();
+            enterFullscreen();
         });
-    });
-
-    return Promise.all(promises).then(items => items.filter(i => i !== null));
-}
-
-function openDB(contents) {
-    console.log("Downloading the Your Contents...");
-    const IndexedDB = indexedDB.open("mirrorLinkContentStorage", 1);
-
-    IndexedDB.onerror = function (event) {
-        console.error("Database error:", event.target.errorCode);
-    };
-
-    IndexedDB.onupgradeneeded = function (event) {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains("contents")) {
-            const objectStore = db.createObjectStore("contents", { keyPath: "id", autoIncrement: true });
-            objectStore.createIndex("Index", "fileName", { unique: true });
-        }
-    };
-
-    IndexedDB.onsuccess = function (event) {
-        let temp_contents = [];
-        const dbInstance = event.target.result;
-        db = dbInstance;
-
-        if (!contents || contents.length === 0) {
-            console.log("No contents assigned to this mirror yet.");
-            const startbutton = document.getElementById('startButton');
-            const loadingText = document.getElementById('loadingText');
-            const startBanner = document.getElementById('startBanner');
-            if (startbutton) startbutton.style.display = "flex";
-            if (loadingText) loadingText.style.display = "none";
-            if (startBanner) startBanner.style.display = "block";
-            return;
-        }
-
-        const downloadPromises = contents.map(content => {
-            return new Promise((resolve) => {
-                const fileName = content.content_url.split('/').pop();
-                fetch(content.content_url)
-                    .then(response => {
-                        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                        return response.blob();
-                    })
-                    .then(fileContent => {
-                        temp_contents.push(fileContent);
-                        try {
-                            const transaction = dbInstance.transaction(["contents"], "readwrite");
-                            const transaction_object = transaction.objectStore("contents");
-                            transaction_object.add({ fileName, fileContent });
-                        } catch (err) {}
-                        resolve();
-                    })
-                    .catch(error => {
-                        console.warn("Fetch error for content:", error);
-                        resolve();
-                    });
-            });
-        });
-
-        Promise.all(downloadPromises).then(() => {
-            console.log('All initial content downloaded successfully!');
-            files = temp_contents;
-            loadFiles(temp_contents);
-        });
-    };
-}
-
-function loadFiles(fileList) {
-    console.log('Loading downloaded files into display presentation...');
-    createElementsFromBlobs(fileList || files).then(elements => {
-        ContentElement = elements;
-        const startbutton = document.getElementById('startButton');
-        const loadingText = document.getElementById('loadingText');
-        const startBanner = document.getElementById('startBanner');
-
-        if (startbutton) startbutton.style.display = "flex";
-        if (loadingText) loadingText.style.display = "none";
-        if (startBanner) startBanner.style.display = "block";
-    });
+        document.body.appendChild(prompt);
+    }
 }
 
 function enterFullscreen() {
     const docEl = document.documentElement;
+    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+    if (isFs) {
+        const prompt = document.getElementById('kiosk-fullscreen-prompt');
+        if (prompt) prompt.remove();
+        return;
+    }
+
     try {
-        if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
-            if (docEl.requestFullscreen) {
-                docEl.requestFullscreen().catch(err => {
+        const req = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
+        if (req) {
+            const p = req.call(docEl);
+            if (p && p.then) {
+                p.then(() => {
+                    const prompt = document.getElementById('kiosk-fullscreen-prompt');
+                    if (prompt) prompt.remove();
+                    document.body.classList.add('hide-cursor');
+                }).catch(err => {
                     console.log("Fullscreen request notice:", err.message);
+                    checkFullscreenKioskPrompt();
                 });
-            } else if (docEl.webkitRequestFullscreen) {
-                docEl.webkitRequestFullscreen();
-            } else if (docEl.mozRequestFullScreen) {
-                docEl.mozRequestFullScreen();
-            } else if (docEl.msRequestFullscreen) {
-                docEl.msRequestFullscreen();
             }
         }
     } catch (e) {
         console.warn("Fullscreen request error:", e);
+        checkFullscreenKioskPrompt();
     }
 }
 
@@ -588,11 +549,10 @@ function startSlideshow() {
     const login_container = document.getElementById('login_container');
 
     if (login_container) login_container.style.display = 'none';
+    if (slideshowContainer) slideshowContainer.style.display = 'block';
 
     if (!ContentElement || ContentElement.length === 0) {
-        if (slideshowContainer) {
-            slideshowContainer.innerHTML = '<div style="color:white;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;font-size:20px;letter-spacing:1px;background:#030712;"><span>Screen Idle — No media assigned to this mirror</span></div>';
-        }
+        showStandbyScreen();
         return;
     }
 
@@ -602,15 +562,19 @@ function startSlideshow() {
         currentIndex = 0;
     }
     showCurrentFile();
+
+    // Verify fullscreen activation; if browser blocked auto-fullscreen without gesture, present prompt
+    setTimeout(() => {
+        enterFullscreen();
+    }, 400);
 }
 
 function reportActiveSlide(contentId, index) {
-    if (!savedUsername && !savedPassword) return;
+    if (!savedMirrorName) return;
 
     const payload = {
         service: 'UpdateActiveSlide',
-        username: savedUsername,
-        password: savedPassword,
+        mirror_name: savedMirrorName,
         content_id: contentId || null,
         index: index !== undefined ? index : 0
     };
@@ -761,17 +725,24 @@ async function showCurrentFile(shouldBroadcast = true) {
 }
 
 // TV Remote, Mouse, & Touch listeners to ensure immersive full screen
-document.addEventListener('click', () => {
-    if (isSlideshowActive) {
+['click', 'pointerdown', 'touchstart'].forEach(evt => {
+    document.addEventListener(evt, () => {
         enterFullscreen();
-    }
+    }, { passive: true });
 });
 
-document.addEventListener('touchstart', () => {
-    if (isSlideshowActive) {
-        enterFullscreen();
-    }
-}, { passive: true });
+['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(evt => {
+    document.addEventListener(evt, () => {
+        const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+        const prompt = document.getElementById('kiosk-fullscreen-prompt');
+        if (isFs) {
+            if (prompt) prompt.remove();
+            document.body.classList.add('hide-cursor');
+        } else if (isSlideshowActive) {
+            checkFullscreenKioskPrompt();
+        }
+    });
+});
 
 document.addEventListener('keydown', (e) => {
     if (isSlideshowActive) {
@@ -780,7 +751,7 @@ document.addEventListener('keydown', (e) => {
             e.preventDefault();
             const targetState = isPaused ? 'playing' : 'paused';
             setPlaybackState(targetState);
-            const req = { service: 'PlaybackControl', action: targetState, username: savedUsername, password: savedPassword };
+            const req = { service: 'PlaybackControl', action: targetState, mirror_name: savedMirrorName };
             if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                 try { wsConnection.send(JSON.stringify(req)); } catch(err){}
             }
