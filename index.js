@@ -404,7 +404,24 @@ function reloadMirrorContents(incomingContents) {
     });
 }
 
+function isIOSDevice() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isIPhoneDevice() {
+    return /iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 && window.innerWidth < 600);
+}
+
+function isStandaloneMode() {
+    return (window.navigator.standalone === true) ||
+        window.matchMedia('(display-mode: standalone)').matches;
+}
+
 function checkFullscreenKioskPrompt() {
+    if (isStandaloneMode()) return;
+
     const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
     let prompt = document.getElementById("kiosk-fullscreen-prompt");
     if (isFs) {
@@ -416,11 +433,25 @@ function checkFullscreenKioskPrompt() {
     if (!prompt) {
         prompt = document.createElement("div");
         prompt.id = "kiosk-fullscreen-prompt";
-        prompt.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:rgba(15,23,42,0.9);border:1px solid rgba(168,85,247,0.6);color:#f8fafc;padding:10px 22px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;box-shadow:0 12px 32px rgba(0,0,0,0.6);cursor:pointer;user-select:none;";
-        prompt.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-            <span>Tap / Click anywhere for Kiosk Full-Screen</span>
-        `;
+        prompt.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:rgba(15,23,42,0.92);border:1px solid rgba(168,85,247,0.6);color:#f8fafc;padding:10px 20px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;box-shadow:0 12px 32px rgba(0,0,0,0.6);cursor:pointer;user-select:none;max-width:92vw;text-align:center;";
+
+        if (isIPhoneDevice()) {
+            prompt.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                <span>For Full-Screen on iOS: Tap Share ➔ <strong>Add to Home Screen</strong></span>
+                <span style="opacity:0.6;font-size:11px;margin-left:4px;">✕</span>
+            `;
+            setTimeout(() => {
+                const p = document.getElementById("kiosk-fullscreen-prompt");
+                if (p) p.remove();
+            }, 6000);
+        } else {
+            prompt.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                <span>Tap / Click anywhere for Kiosk Full-Screen</span>
+            `;
+        }
+
         prompt.addEventListener("click", (e) => {
             e.stopPropagation();
             enterFullscreen();
@@ -432,28 +463,50 @@ function checkFullscreenKioskPrompt() {
 function enterFullscreen() {
     const docEl = document.documentElement;
     const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-    if (isFs) {
+    if (isFs || isStandaloneMode()) {
         const prompt = document.getElementById("kiosk-fullscreen-prompt");
         if (prompt) prompt.remove();
         return;
     }
 
     try {
-        const req = docEl.requestFullscreen || docEl.webkitRequestFullscreen || docEl.mozRequestFullScreen || docEl.msRequestFullscreen;
-        if (req) {
+        window.scrollTo(0, 1);
+    } catch (e) { }
+
+    const req = docEl.requestFullscreen ||
+        docEl.webkitRequestFullscreen ||
+        docEl.webkitRequestFullScreen ||
+        docEl.mozRequestFullScreen ||
+        docEl.msRequestFullscreen;
+
+    if (req) {
+        try {
             const p = req.call(docEl);
-            if (p && p.then) {
+            if (p && typeof p.then === 'function') {
                 p.then(() => {
                     const prompt = document.getElementById("kiosk-fullscreen-prompt");
                     if (prompt) prompt.remove();
                     document.body.classList.add("hide-cursor");
-                }).catch(() => {
-                    checkFullscreenKioskPrompt();
-                });
+                }).catch(() => { });
+            } else {
+                // Synchronous WebKit/Safari
+                const prompt = document.getElementById("kiosk-fullscreen-prompt");
+                if (prompt) prompt.remove();
+                document.body.classList.add("hide-cursor");
             }
+        } catch (e) {
+            console.warn("Fullscreen request error:", e);
         }
-    } catch (e) {
-        checkFullscreenKioskPrompt();
+    } else if (isIPhoneDevice()) {
+        // iPhone Safari doesn't support DOM requestFullscreen; try native video fullscreen if playing
+        const vidEl = getSlideshowVideo();
+        if (vidEl && vidEl.style.display !== "none" && typeof vidEl.webkitEnterFullscreen === "function") {
+            try {
+                vidEl.webkitEnterFullscreen();
+            } catch (e) { }
+        }
+        const prompt = document.getElementById("kiosk-fullscreen-prompt");
+        if (prompt) prompt.remove();
     }
 }
 
@@ -677,8 +730,8 @@ function showCurrentFile(shouldBroadcast = true) {
     }
 }
 
-// User Gesture listeners for kiosk full-screen
-["click", "pointerdown", "touchstart"].forEach(evt => {
+// User Gesture listeners for kiosk full-screen (use click and touchend for reliable WebKit activation)
+["click", "touchend"].forEach(evt => {
     document.addEventListener(evt, () => {
         enterFullscreen();
     }, { passive: true });
