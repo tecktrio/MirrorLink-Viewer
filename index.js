@@ -12,6 +12,8 @@ let pollTimeout = null;
 let mirrorPhotoDuration = 5;
 
 const SERVER_URL = "https://mirrorlink.bigburry.com/api/Mirror";
+const SERVER_STREAM_URL = "https://mirrorlink.bigburry.com/api/MirrorStream";
+let mirrorEventSource = null;
 
 // Low-RAM Smart TV Architecture: Single Reusable DOM Elements
 function getSlideshowImage() {
@@ -306,156 +308,125 @@ function Login(e) {
         localStorage.setItem("mirror_saved_name", mirrorName);
     } catch (err) { }
 
-    const request_data = {
-        mirror_name: mirrorName,
-        service: "login"
-    };
-
-    fetch(SERVER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(request_data)
-    })
-        .then(response => response.json())
-        .then((data) => {
-            if (data.status_code === 401 || data.status_code === 400 || data.status_code === 404) {
-                if (errorText) {
-                    errorText.innerHTML = data.status_text || `Mirror "${mirrorName}" not found. Check the mirror name.`;
-                    errorText.style.display = "block";
-                }
-                if (loading_button) loading_button.style.display = "none";
-                if (login_button) login_button.style.display = "flex";
-                return;
-            }
-
-            console.log(`Mirror stream "${mirrorName}" connected successfully.`);
-            if (errorText) errorText.style.display = "none";
-
-        // Start HTTP polling sync
-        startPollingFallback();
-
-            if (data.photo_duration) {
-                mirrorPhotoDuration = Number(data.photo_duration);
-            }
-            if (data.active_content_index !== undefined) {
-                initialServerIndex = Number(data.active_content_index);
-                currentIndex = initialServerIndex;
-            }
-            if (data.sync_timestamp) {
-                lastKnownSyncTimestamp = data.sync_timestamp;
-            }
-            if (data.playback_state === "paused") {
-                isPaused = true;
-            }
-
-            rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
-
-            if (rawContents.length === 0) {
-                console.log("No media assigned to this mirror yet.");
-                showStandbyScreen();
-                return;
-            }
-
-            console.log(`Loaded ${rawContents.length} media item(s). Starting slideshow immediately.`);
-            if (initialServerIndex !== undefined && rawContents.length > 0) {
-                currentIndex = initialServerIndex % rawContents.length;
-            } else {
-                currentIndex = 0;
-            }
-
-            // Start presentation immediately
-            startSlideshow();
-        })
-        .catch((error) => {
-            console.error("Mirror connect error:", error);
-            if (errorText) {
-                errorText.innerText = "Network connection error: " + error.message;
-                errorText.style.display = "block";
-            }
-            if (loading_button) loading_button.style.display = "none";
-            if (login_button) login_button.style.display = "flex";
-        });
+    connectMirrorStream(mirrorName);
 }
 
-// Low-overhead adaptive polling: Only polls when needed to avoid CPU & memory thrashing on Smart TVs
-function startPollingFallback() {
-    if (pollTimeout) clearTimeout(pollTimeout);
+// =========================================================================
+// Real-Time Server-Driven Conductor: Server-Sent Events (SSE) Stream
+// The server owns the master timeline and triggers slide changes to 100+
+// screens simultaneously with ZERO client polling overhead.
+// =========================================================================
+function connectMirrorStream(mirrorName) {
+    if (mirrorEventSource) {
+        try { mirrorEventSource.close(); } catch (e) { }
+        mirrorEventSource = null;
+    }
 
-    function pollStep() {
-        if (!savedMirrorName || isReloading) {
-            scheduleNextPoll(10000);
-            return;
-        }
+    const errorText = document.getElementById("error");
+    const loading_button = document.getElementById("loading_button");
+    const login_button = document.getElementById("login_button");
 
-        const nextDelay = 5000;
+    const streamUrl = `${SERVER_STREAM_URL}?mirror_name=${encodeURIComponent(mirrorName)}`;
+    console.log("[MirrorSync] Connecting real-time Server Conductor stream:", streamUrl);
 
-        fetch(SERVER_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                mirror_name: savedMirrorName,
-                service: "CheckMirrorUpdate"
-            })
-        })
-            .then(res => res.json())
-            .then(resData => {
-                if (!resData) {
-                    scheduleNextPoll(nextDelay);
+    try {
+        mirrorEventSource = new EventSource(streamUrl);
+
+        // 1. Initial State Handshake: Server sends current playlist and active index on connect
+        mirrorEventSource.addEventListener("init", (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                console.log("[MirrorSync] Initial state received from server conductor:", data);
+                if (data.status_code === 404) {
+                    if (errorText) {
+                        errorText.innerText = data.status_text || `Mirror "${mirrorName}" not found. Check the mirror name.`;
+                        errorText.style.display = "block";
+                    }
+                    if (loading_button) loading_button.style.display = "none";
+                    if (login_button) login_button.style.display = "flex";
                     return;
                 }
 
-                // 1. Refresh detection
-                if (resData.last_refresh_timestamp) {
-                    if (lastKnownTimestamp === 0) {
-                        lastKnownTimestamp = resData.last_refresh_timestamp;
-                    } else if (resData.last_refresh_timestamp > lastKnownTimestamp) {
-                        lastKnownTimestamp = resData.last_refresh_timestamp;
-                        reloadMirrorContents(resData.data);
-                        return;
+                if (errorText) errorText.style.display = "none";
+                if (loading_button) loading_button.style.display = "none";
+                if (login_button) login_button.style.display = "flex";
+
+                if (data.photo_duration) mirrorPhotoDuration = Number(data.photo_duration);
+                if (data.active_content_index !== undefined) currentIndex = Number(data.active_content_index);
+                isPaused = (data.playback_state === "paused");
+
+                rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
+                if (rawContents.length === 0) {
+                    console.log("[MirrorSync] No media assigned to this mirror yet.");
+                    showStandbyScreen();
+                } else {
+                    console.log(`[MirrorSync] Loaded ${rawContents.length} media item(s). Starting synchronized slideshow.`);
+                    startSlideshow();
+                }
+            } catch (err) {
+                console.error("[MirrorSync] Init event parse error:", err);
+            }
+        });
+
+        // 2. Synchronized Slide Transition Trigger:
+        // All 100+ screens receive this event at the exact same millisecond and switch together!
+        mirrorEventSource.addEventListener("slide_change", (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                console.log("[MirrorSync] Server conductor triggered slide change:", data.index);
+                if (data.index !== undefined && rawContents.length > 0) {
+                    currentIndex = Number(data.index) % rawContents.length;
+                    if (!isSlideshowActive) {
+                        startSlideshow();
+                    } else {
+                        showCurrentFile(false);
                     }
                 }
+            } catch (err) {
+                console.error("[MirrorSync] Slide change trigger error:", err);
+            }
+        });
 
-                // 2. Playback state detection
-                if (resData.playback_state) {
-                    if (resData.playback_state === "paused" && !isPaused) {
-                        setPlaybackState("paused");
-                    } else if (resData.playback_state === "playing" && isPaused) {
-                        setPlaybackState("playing");
-                    }
-                }
+        // 3. Central Playback Control: Admin paused or resumed the mirror from dashboard
+        mirrorEventSource.addEventListener("playback_control", (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                console.log("[MirrorSync] Server pushed playback control:", data.action);
+                setPlaybackState(data.action);
+            } catch (err) {
+                console.error("[MirrorSync] Playback control error:", err);
+            }
+        });
 
-                // 3. Slide sync detection
-                if (resData.sync_timestamp && resData.sync_timestamp > lastKnownSyncTimestamp) {
-                    lastKnownSyncTimestamp = resData.sync_timestamp;
-                    if (resData.active_content_index !== undefined && rawContents.length > 0) {
-                        const newIdx = Number(resData.active_content_index) % rawContents.length;
-                        if (newIdx !== currentIndex) {
-                            currentIndex = newIdx;
-                            if (!isPaused && isSlideshowActive) {
-                                showCurrentFile(false);
-                            }
-                        }
-                    }
-                }
+        // 4. Content / Playlist Update: Admin added, reordered, or removed content
+        mirrorEventSource.addEventListener("update_playlist", (e) => {
+            try {
+                const data = JSON.parse(e.data);
+                console.log("[MirrorSync] Server pushed updated playlist:", data);
+                reloadMirrorContents(data.data);
+            } catch (err) {
+                console.error("[MirrorSync] Playlist update error:", err);
+            }
+        });
 
-                // 4. Photo speed
-                if (resData.photo_duration) {
-                    mirrorPhotoDuration = Number(resData.photo_duration);
-                }
+        // 5. Standby screen: No content assigned
+        mirrorEventSource.addEventListener("standby", (e) => {
+            console.log("[MirrorSync] Standby triggered by server.");
+            showStandbyScreen();
+        });
 
-                scheduleNextPoll(nextDelay);
-            })
-            .catch(() => {
-                scheduleNextPoll(nextDelay);
-            });
+        mirrorEventSource.onerror = (err) => {
+            console.warn("[MirrorSync] SSE stream interrupted. Holding current slide on screen while auto-reconnecting...", err);
+            // EventSource automatically reconnects. While disconnected, the current slide stays on screen without crashing.
+        };
+
+        mirrorEventSource.onopen = () => {
+            console.log("[MirrorSync] SSE Stream connected. Ready for server triggers.");
+        };
+
+    } catch (e) {
+        console.error("[MirrorSync] Failed to initialize EventSource:", e);
     }
-
-    function scheduleNextPoll(delay) {
-        if (pollTimeout) clearTimeout(pollTimeout);
-        pollTimeout = setTimeout(pollStep, delay);
-    }
-
-    scheduleNextPoll(6000);
 }
 
 function reloadMirrorContents(incomingContents) {
@@ -633,20 +604,8 @@ function startSlideshow() {
 }
 
 function reportActiveSlide(contentId, index) {
-    if (!savedMirrorName) return;
-
-    const payload = {
-        service: "UpdateActiveSlide",
-        mirror_name: savedMirrorName,
-        content_id: contentId || null,
-        index: index !== undefined ? index : 0
-    };
-
-    fetch(SERVER_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    }).catch(() => { });
+    // In server-conductor mode, the server controls and knows the active slide.
+    // Client does not need to send update requests.
 }
 
 function setPlaybackState(targetState) {
@@ -801,13 +760,9 @@ function showCurrentFile(shouldBroadcast = true) {
             setTimeout(onVideoStarted, 2500);
 
             const handleVideoNext = () => {
-                if (slideshowTimer) {
-                    clearTimeout(slideshowTimer);
-                    slideshowTimer = null;
-                }
-                if (!isPaused && isSlideshowActive) {
-                    currentIndex = (currentIndex + 1) % rawContents.length;
-                    showCurrentFile(true);
+                // Video ended: Hold final frame until server conductor triggers slide_change
+                if (vidEl) {
+                    try { vidEl.pause(); } catch (e) { }
                 }
             };
 
@@ -893,17 +848,8 @@ function showCurrentFile(shouldBroadcast = true) {
         imgPreloader.onerror = showLoadedImage;
         imgPreloader.src = currentUrl;
 
-        const durationSec = (currentItem.duration && Number(currentItem.duration) > 0)
-            ? Number(currentItem.duration)
-            : (mirrorPhotoDuration || 5);
-        const durationMs = Math.max(1, durationSec) * 1000;
-
-        slideshowTimer = setTimeout(() => {
-            if (!isPaused && isSlideshowActive) {
-                currentIndex = (currentIndex + 1) % rawContents.length;
-                showCurrentFile(true);
-            }
-        }, durationMs);
+        // Note: Slide is NOT advanced by local client timer.
+        // It holds on screen until the central server conductor pushes the synchronized 'slide_change' trigger!
     }
 }
 
