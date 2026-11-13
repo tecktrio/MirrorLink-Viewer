@@ -10,6 +10,21 @@
     <meta name="theme-color" content="#000000" />
     <link rel="stylesheet" href="index.css" />
     <title>MirrorLink Display | Signage Viewer</title>
+    <script>
+        // Auto-cleanup legacy service workers and bloated IndexedDB that crash TV memory on boot
+        try {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function(regs) {
+                    for (var i = 0; i < regs.length; i++) {
+                        regs[i].unregister();
+                    }
+                }).catch(function() {});
+            }
+            if (window.indexedDB && window.indexedDB.deleteDatabase) {
+                window.indexedDB.deleteDatabase('mirrorLinkContentStorage');
+            }
+        } catch (e) {}
+    </script>
 </head>
 
 <body>
