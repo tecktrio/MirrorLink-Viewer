@@ -700,8 +700,14 @@ function showCurrentFile(shouldBroadcast = true) {
             vidEl.onended = null;
             vidEl.onerror = null;
 
+            try {
+                vidEl.pause();
+            } catch (e) {}
+
             vidEl.src = currentUrl;
-            vidEl.currentTime = 0;
+            try {
+                vidEl.load();
+            } catch (e) {}
 
             const handleVideoNext = () => {
                 if (!isPaused && isSlideshowActive) {

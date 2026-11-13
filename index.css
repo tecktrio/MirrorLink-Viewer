@@ -49,20 +49,15 @@ html, body {
 
 #slideshowContainer img,
 #slideshowContainer video {
-    width: 100vw !important;
-    height: 100vh !important;
-    object-fit: cover !important;
-    position: fixed !important;
+    position: absolute !important;
     top: 0 !important;
     left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
     border: none !important;
+    outline: none !important;
     background-color: #000000;
-    transform: translateZ(0);
-    -webkit-transform: translateZ(0);
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
-    contain: strict;
-    image-rendering: -webkit-optimize-contrast;
 }
 
 /* Native Fullscreen pseudo-classes for Smart TVs and Browsers */
@@ -104,43 +99,22 @@ body.hide-cursor * {
     background: radial-gradient(circle at 50% 20%, rgba(126, 34, 206, 0.15) 0%, rgba(7, 9, 14, 0.95) 75%);
 }
 
-/* Ambient glow accents */
+/* Ambient glow accents - disabled for low-RAM Smart TV stability */
 .ambient-glow {
-    position: absolute;
-    width: 480px;
-    height: 480px;
-    border-radius: 50%;
-    filter: blur(140px);
-    pointer-events: none;
-    opacity: 0.5;
-    z-index: -1;
-}
-
-.glow-1 {
-    top: 10%;
-    left: 20%;
-    background: rgba(147, 51, 234, 0.25);
-}
-
-.glow-2 {
-    bottom: 10%;
-    right: 20%;
-    background: rgba(99, 102, 241, 0.2);
+    display: none !important;
 }
 
 /* Glass Card */
 #container {
     width: 100%;
     max-width: 440px;
-    background: var(--bg-surface);
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
+    background: #0f172a;
     border: 1px solid var(--border-color);
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 40px -10px rgba(147, 51, 234, 0.18);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
     border-radius: 20px;
     padding: 40px 36px;
     transition: all 0.3s ease;
-    animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: fadeIn 0.4s ease-out;
 }
 
 @keyframes fadeIn {
