@@ -14,6 +14,21 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="index.css" />
     <title>MirrorLink Display | Signage Viewer</title>
+    <script>
+        // Emergency Smart TV Cleanup: Flush legacy service workers and bloated IndexedDB that crash TV memory on boot
+        try {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function(regs) {
+                    for (var i = 0; i < regs.length; i++) {
+                        regs[i].unregister();
+                    }
+                }).catch(function() {});
+            }
+            if (window.indexedDB && window.indexedDB.deleteDatabase) {
+                window.indexedDB.deleteDatabase('mirrorLinkContentStorage');
+            }
+        } catch (e) {}
+    </script>
 </head>
 
 <body>
@@ -97,29 +112,6 @@
     </div>
 
     <script src="index.js"></script>
-    <script>
-        // Observe error div text changes to toggle visibility cleanly
-        if (window.MutationObserver) {
-            const errEl = document.getElementById('error');
-            if (errEl) {
-                const observer = new MutationObserver(() => {
-                    errEl.style.display = errEl.innerText.trim() ? 'block' : 'none';
-                });
-                observer.observe(errEl, { childList: true, characterData: true, subtree: true });
-            }
-            // Observe startButton display changes to toggle startBanner visibility
-            const startBtn = document.getElementById('startButton');
-            const startBanner = document.getElementById('startBanner');
-            if (startBtn && startBanner) {
-                const btnObserver = new MutationObserver(() => {
-                    if (startBtn.style.display !== 'none') {
-                        startBanner.style.display = 'block';
-                    }
-                });
-                btnObserver.observe(startBtn, { attributes: true, attributeFilter: ['style'] });
-            }
-        }
-    </script>
 </body>
 
 </html>
