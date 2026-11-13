@@ -801,6 +801,10 @@ function showCurrentFile(shouldBroadcast = true) {
             setTimeout(onVideoStarted, 2500);
 
             const handleVideoNext = () => {
+                if (slideshowTimer) {
+                    clearTimeout(slideshowTimer);
+                    slideshowTimer = null;
+                }
                 if (!isPaused && isSlideshowActive) {
                     currentIndex = (currentIndex + 1) % rawContents.length;
                     showCurrentFile(true);
@@ -808,6 +812,26 @@ function showCurrentFile(shouldBroadcast = true) {
             };
 
             vidEl.onended = handleVideoNext;
+
+            // Video watchdog timer: ensures a stalled network stream never freezes the display
+            const fallbackDuration = (currentItem.duration && Number(currentItem.duration) > 0)
+                ? Number(currentItem.duration)
+                : (mirrorPhotoDuration || 10);
+            slideshowTimer = setTimeout(() => {
+                console.log("[Smart TV Video] Video watchdog timeout reached, advancing slide.");
+                handleVideoNext();
+            }, Math.max(5, fallbackDuration + 3) * 1000);
+
+            vidEl.onloadedmetadata = () => {
+                const actualDuration = (vidEl.duration && !isNaN(vidEl.duration) && vidEl.duration > 0)
+                    ? vidEl.duration
+                    : fallbackDuration;
+                if (slideshowTimer) clearTimeout(slideshowTimer);
+                slideshowTimer = setTimeout(() => {
+                    console.log("[Smart TV Video] Video duration watchdog timeout, advancing slide.");
+                    handleVideoNext();
+                }, Math.max(5, Math.ceil(actualDuration + 2)) * 1000);
+            };
 
             // Handle Smart TV codec errors safely without crashing browser
             vidEl.onerror = (e) => {
@@ -944,3 +968,12 @@ setInterval(() => {
         enableKeepAwake();
     }
 }, 30000);
+
+// Enterprise Signage Best Practice: 24-Hour clean memory cycle (prevents browser RAM leak accumulation on 24/7 TV panels)
+const VIEWER_BOOT_TIMESTAMP = Date.now();
+setInterval(() => {
+    if (Date.now() - VIEWER_BOOT_TIMESTAMP > 24 * 60 * 60 * 1000) {
+        console.log("[Signage Watchdog] 24-hour continuous playback threshold reached. Soft-refreshing to purge RAM.");
+        window.location.reload();
+    }
+}, 30 * 60 * 1000);
