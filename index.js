@@ -1,7 +1,6 @@
 let currentIndex = 0;
 let initialServerIndex = 0;
 let savedMirrorName = "";
-let wsConnection = null;
 let slideshowTimer = null;
 let isSlideshowActive = false;
 let isReloading = false;
@@ -13,7 +12,6 @@ let pollTimeout = null;
 let mirrorPhotoDuration = 5;
 
 const SERVER_URL = "https://mirrorlink.bigburry.com/api/Mirror";
-const SERVER_WEBSOCKET_URL = "wss://mirrorlink.bigburry.com/mirror?";
 
 // Low-RAM Smart TV Architecture: Single Reusable DOM Elements
 function getSlideshowImage() {
@@ -246,8 +244,7 @@ function Login(e) {
         console.log(`Mirror stream "${mirrorName}" connected successfully.`);
         if (errorText) errorText.style.display = "none";
 
-        // Connect real-time WebSocket and adaptive polling fallback
-        connectWebSocket(mirrorName);
+        // Start HTTP polling sync
         startPollingFallback();
 
         if (data.photo_duration) {
@@ -293,101 +290,6 @@ function Login(e) {
     });
 }
 
-let wsAvailable = true;
-
-function connectWebSocket(mirrorName) {
-    if (!wsAvailable) {
-        return;
-    }
-
-    if (wsConnection) {
-        try {
-            wsConnection.onclose = null;
-            wsConnection.onerror = null;
-            wsConnection.close();
-        } catch (e) {}
-    }
-
-    const wsUrl = `${SERVER_WEBSOCKET_URL}mirror_name=${encodeURIComponent(mirrorName)}`;
-    console.log("[Mirror WebSocket] Attempting stream connection for:", mirrorName);
-
-    let hasEverOpened = false;
-
-    try {
-        wsConnection = new WebSocket(wsUrl);
-
-        wsConnection.onopen = () => {
-            hasEverOpened = true;
-            console.log("[Mirror WebSocket] Connected to MirrorLink Server successfully for mirror:", mirrorName);
-        };
-
-        wsConnection.onmessage = (event) => {
-            try {
-                const message = JSON.parse(event.data);
-                const payload = message.data !== undefined ? message.data : message;
-                const service = message.service || (payload && payload.service);
-
-                if (service === "ReloadContents" || service === "ReloadMirror" || service === "refresh" || service === "RefreshMirror") {
-                    console.log("[Mirror WebSocket] Reload trigger received! Reloading new contents...");
-                    const incomingList = Array.isArray(payload) ? payload : (payload && payload.contents ? payload.contents : null);
-                    reloadMirrorContents(incomingList);
-                } else if (service === "PlaybackControl") {
-                    const action = payload.action;
-                    console.log("[Mirror WebSocket] Playback control signal received:", action);
-                    setPlaybackState(action === "pause" || action === "paused" ? "paused" : "playing");
-                } else if (service === "SyncSlide") {
-                    const targetIndex = payload.index;
-                    console.log("[Mirror WebSocket] Sync slide signal received:", targetIndex);
-                    if (targetIndex !== undefined && rawContents.length > 0) {
-                        const newIdx = Number(targetIndex) % rawContents.length;
-                        if (newIdx !== currentIndex) {
-                            currentIndex = newIdx;
-                            if (!isPaused && isSlideshowActive) {
-                                showCurrentFile(false); // don't re-broadcast on remote sync
-                            }
-                        }
-                    }
-                } else if (service === "UpdateSettings" || service === "SetPhotoSpeed") {
-                    if (payload && payload.photo_duration) {
-                        mirrorPhotoDuration = Number(payload.photo_duration);
-                    }
-                    if (payload && payload.content_id && payload.duration && rawContents) {
-                        const target = rawContents.find(c => String(c._id) === String(payload.content_id));
-                        if (target) {
-                            target.duration = Number(payload.duration);
-                        }
-                    }
-                }
-            } catch (err) {
-                console.error("[Mirror WebSocket] Error handling message:", err);
-            }
-        };
-
-        wsConnection.onerror = (err) => {
-            console.warn("[Mirror WebSocket] WebSocket unavailable, continuing with HTTP polling sync.");
-        };
-
-        wsConnection.onclose = () => {
-            wsConnection = null;
-            if (!hasEverOpened) {
-                // If handshake failed on startup (e.g. HTTP 200 instead of 101), disable to avoid crashing Smart TV WebKit
-                console.log("[Mirror WebSocket] Endpoint does not support WebSocket handshake. Falling back to HTTP sync.");
-                wsAvailable = false;
-            } else {
-                // Reconnect conservatively after 20s if it previously worked
-                setTimeout(() => {
-                    if (savedMirrorName && !wsConnection && wsAvailable) {
-                        connectWebSocket(savedMirrorName);
-                    }
-                }, 20000);
-            }
-        };
-    } catch (e) {
-        console.warn("[Mirror WebSocket] WebSocket init bypassed:", e);
-        wsAvailable = false;
-    }
-}
-
 // Low-overhead adaptive polling: Only polls when needed to avoid CPU & memory thrashing on Smart TVs
 function startPollingFallback() {
     if (pollTimeout) clearTimeout(pollTimeout);
@@ -398,9 +300,7 @@ function startPollingFallback() {
             return;
         }
 
-        const isWsActive = wsConnection && wsConnection.readyState === WebSocket.OPEN;
-        // If WebSocket is alive, poll very infrequently (15s); if disconnected, check every 5s
-        const nextDelay = isWsActive ? 15000 : 5000;
+        const nextDelay = 5000;
 
         fetch(SERVER_URL, {
             method: "POST",
@@ -569,7 +469,6 @@ function enterFullscreen() {
 
 function startSlideshow() {
     isSlideshowActive = true;
-    enterFullscreen();
     document.body.classList.add("slideshow-active", "hide-cursor");
 
     const slideshowContainer = document.getElementById("slideshowContainer");
@@ -590,10 +489,6 @@ function startSlideshow() {
     }
 
     showCurrentFile();
-
-    setTimeout(() => {
-        enterFullscreen();
-    }, 400);
 }
 
 function reportActiveSlide(contentId, index) {
@@ -605,12 +500,6 @@ function reportActiveSlide(contentId, index) {
         content_id: contentId || null,
         index: index !== undefined ? index : 0
     };
-
-    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-        try {
-            wsConnection.send(JSON.stringify(payload));
-        } catch (e) {}
-    }
 
     fetch(SERVER_URL, {
         method: "POST",
@@ -835,9 +724,6 @@ document.addEventListener("keydown", (e) => {
             const targetState = isPaused ? "playing" : "paused";
             setPlaybackState(targetState);
             const req = { service: "PlaybackControl", action: targetState, mirror_name: savedMirrorName };
-            if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-                try { wsConnection.send(JSON.stringify(req)); } catch(err){}
-            }
             fetch(SERVER_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
