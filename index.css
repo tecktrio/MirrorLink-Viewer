@@ -64,7 +64,7 @@ body {
     object-fit: cover !important;
     border: none !important;
     outline: none !important;
-    background-color: #000000;
+    background-color: transparent !important;
 }
 
 /* Native Fullscreen pseudo-classes for Smart TVs and Browsers */

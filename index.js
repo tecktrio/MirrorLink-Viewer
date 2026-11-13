@@ -42,6 +42,8 @@ function getSlideshowVideo() {
             vid.playsInline = true;
             vid.setAttribute("playsinline", "");
             vid.setAttribute("webkit-playsinline", "");
+            vid.preload = "auto";
+            vid.setAttribute("preload", "auto");
             vid.style.display = "none";
             container.appendChild(vid);
         }
@@ -704,7 +706,21 @@ function setPlaybackState(targetState) {
     }
 }
 
-// Low-RAM Smart TV Engine: Switches between single <img> and single <video> with strict decoder cleanup
+function preloadNextSlide() {
+    if (!rawContents || rawContents.length <= 1) return;
+    const nextIdx = (currentIndex + 1) % rawContents.length;
+    const nextItem = rawContents[nextIdx];
+    if (nextItem && nextItem.content_url) {
+        const isNextVideo = (nextItem.content_format && nextItem.content_format.toLowerCase().includes("video")) ||
+            /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(nextItem.content_url);
+        if (!isNextVideo) {
+            const preloader = new Image();
+            preloader.src = nextItem.content_url;
+        }
+    }
+}
+
+// Low-RAM Smart TV Engine: Switches between single <img> and single <video> with seamless zero-black-screen transitions
 function showCurrentFile(shouldBroadcast = true) {
     if (!isSlideshowActive) return;
 
@@ -743,33 +759,46 @@ function showCurrentFile(shouldBroadcast = true) {
         return;
     }
 
+    // Preload next upcoming slide to eliminate network lag transitions
+    preloadNextSlide();
+
     const imgEl = getSlideshowImage();
     const vidEl = getSlideshowVideo();
 
     if (isVideo) {
         pauseKeepAwakeMedia();
         requestScreenWakeLock();
-        // Free image memory from GPU/RAM
-        if (imgEl) {
-            imgEl.onload = null;
-            imgEl.onerror = null;
-            imgEl.removeAttribute("src");
-            imgEl.style.display = "none";
-        }
 
         if (vidEl) {
-            vidEl.style.display = "block";
             vidEl.onended = null;
             vidEl.onerror = null;
+            vidEl.onplaying = null;
+            vidEl.onloadeddata = null;
 
             try {
                 vidEl.pause();
             } catch (e) { }
 
-            vidEl.src = currentUrl;
-            try {
-                vidEl.load();
-            } catch (e) { }
+            // Seamless transition: Keep the previous image visible until the video has decoded its first frame!
+            let videoStarted = false;
+            const onVideoStarted = () => {
+                if (videoStarted) return;
+                videoStarted = true;
+                vidEl.style.display = "block";
+                vidEl.style.zIndex = "2";
+                if (imgEl && imgEl.style.display !== "none") {
+                    imgEl.onload = null;
+                    imgEl.onerror = null;
+                    imgEl.removeAttribute("src");
+                    imgEl.style.display = "none";
+                    imgEl.style.zIndex = "1";
+                }
+            };
+
+            vidEl.onplaying = onVideoStarted;
+            vidEl.onloadeddata = onVideoStarted;
+            // Safety watchdog: ensure previous image is hidden if video started silently
+            setTimeout(onVideoStarted, 2500);
 
             const handleVideoNext = () => {
                 if (!isPaused && isSlideshowActive) {
@@ -787,6 +816,14 @@ function showCurrentFile(shouldBroadcast = true) {
                 slideshowTimer = setTimeout(handleVideoNext, 3000);
             };
 
+            vidEl.src = currentUrl;
+
+            // If no previous image was displayed (e.g. boot-up), reveal video immediately
+            if (!imgEl || imgEl.style.display === "none") {
+                vidEl.style.display = "block";
+                vidEl.style.zIndex = "2";
+            }
+
             const playPromise = vidEl.play();
             if (playPromise !== undefined) {
                 playPromise.catch((err) => {
@@ -800,22 +837,37 @@ function showCurrentFile(shouldBroadcast = true) {
         // Showing photo: Ensure keep-awake video is active to prevent TV screensaver
         startKeepAwakeMedia();
         requestScreenWakeLock();
-        // Immediately free video hardware decoder and video buffer from TV firmware
-        if (vidEl) {
-            try {
-                vidEl.pause();
-                vidEl.onended = null;
-                vidEl.onerror = null;
-                vidEl.removeAttribute("src");
-                // Do NOT call vidEl.load() with an empty src - causes native WebKit segfault on Smart TVs
-            } catch (e) { }
-            vidEl.style.display = "none";
-        }
 
-        if (imgEl) {
-            imgEl.style.display = "block";
-            imgEl.src = currentUrl;
-        }
+        // Seamless transition: Preload the image in memory before swapping so there is zero black flash
+        const imgPreloader = new Image();
+        const showLoadedImage = () => {
+            if (!isSlideshowActive || isPaused) return;
+
+            if (imgEl) {
+                imgEl.src = currentUrl;
+                imgEl.style.display = "block";
+                imgEl.style.zIndex = "2";
+            }
+
+            // Immediately free video hardware decoder and video buffer from TV firmware
+            if (vidEl) {
+                try {
+                    vidEl.pause();
+                    vidEl.onended = null;
+                    vidEl.onerror = null;
+                    vidEl.onplaying = null;
+                    vidEl.onloadeddata = null;
+                    vidEl.removeAttribute("src");
+                    // Do NOT call vidEl.load() with an empty src - causes native WebKit segfault on Smart TVs
+                } catch (e) { }
+                vidEl.style.display = "none";
+                vidEl.style.zIndex = "1";
+            }
+        };
+
+        imgPreloader.onload = showLoadedImage;
+        imgPreloader.onerror = showLoadedImage;
+        imgPreloader.src = currentUrl;
 
         const durationSec = (currentItem.duration && Number(currentItem.duration) > 0)
             ? Number(currentItem.duration)
