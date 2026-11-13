@@ -352,7 +352,10 @@ function connectMirrorStream(mirrorName) {
                 if (login_button) login_button.style.display = "flex";
 
                 if (data.photo_duration) mirrorPhotoDuration = Number(data.photo_duration);
-                if (data.active_content_index !== undefined) currentIndex = Number(data.active_content_index);
+                if (data.active_content_index !== undefined) {
+                    currentIndex = Number(data.active_content_index);
+                    initialServerIndex = currentIndex;
+                }
                 isPaused = (data.playback_state === "paused");
 
                 rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
@@ -360,7 +363,7 @@ function connectMirrorStream(mirrorName) {
                     console.log("[MirrorSync] No media assigned to this mirror yet.");
                     showStandbyScreen();
                 } else {
-                    console.log(`[MirrorSync] Loaded ${rawContents.length} media item(s). Starting synchronized slideshow.`);
+                    console.log(`[MirrorSync] Loaded ${rawContents.length} media item(s). Starting synchronized slideshow at index ${currentIndex}.`);
                     startSlideshow();
                 }
             } catch (err) {
@@ -375,7 +378,9 @@ function connectMirrorStream(mirrorName) {
                 const data = JSON.parse(e.data);
                 console.log("[MirrorSync] Server conductor triggered slide change:", data.index);
                 if (data.index !== undefined && rawContents.length > 0) {
-                    currentIndex = Number(data.index) % rawContents.length;
+                    const newIndex = Number(data.index) % rawContents.length;
+                    currentIndex = newIndex;
+                    initialServerIndex = newIndex;
                     if (!isSlideshowActive) {
                         startSlideshow();
                     } else {
@@ -600,7 +605,7 @@ function startSlideshow() {
         currentIndex = 0;
     }
 
-    showCurrentFile();
+    showCurrentFile(false);
 }
 
 function reportActiveSlide(contentId, index) {
