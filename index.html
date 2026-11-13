@@ -18,13 +18,13 @@
 
 <body>
     <!-- Full-screen presentation container for active images and videos -->
-    <div id="slideshowContainer" onclick="enterFullscreen()">
+    <div id="slideshowContainer" onclick="enterFullscreen()" style="display: none;">
         <img id="slideshowImage" alt="Display Media" style="display: none;" />
         <video id="slideshowVideo" muted playsinline webkit-playsinline preload="none" style="display: none;"></video>
     </div>
 
-    <!-- Login & Standby HUD (hidden by default when loading direct mirror stream) -->
-    <div id="login_container" style="display: none;">
+    <!-- Login & Standby HUD -->
+    <div id="login_container">
         <div id="container">
             <!-- Brand Header -->
             <div class="brand-header">
@@ -99,23 +99,25 @@
     <script src="index.js"></script>
     <script>
         // Observe error div text changes to toggle visibility cleanly
-        const errEl = document.getElementById('error');
-        if (errEl) {
-            const observer = new MutationObserver(() => {
-                errEl.style.display = errEl.innerText.trim() ? 'block' : 'none';
-            });
-            observer.observe(errEl, { childList: true, characterData: true, subtree: true });
-        }
-        // Observe startButton display changes to toggle startBanner visibility
-        const startBtn = document.getElementById('startButton');
-        const startBanner = document.getElementById('startBanner');
-        if (startBtn && startBanner) {
-            const btnObserver = new MutationObserver(() => {
-                if (startBtn.style.display !== 'none') {
-                    startBanner.style.display = 'block';
-                }
-            });
-            btnObserver.observe(startBtn, { attributes: true, attributeFilter: ['style'] });
+        if (window.MutationObserver) {
+            const errEl = document.getElementById('error');
+            if (errEl) {
+                const observer = new MutationObserver(() => {
+                    errEl.style.display = errEl.innerText.trim() ? 'block' : 'none';
+                });
+                observer.observe(errEl, { childList: true, characterData: true, subtree: true });
+            }
+            // Observe startButton display changes to toggle startBanner visibility
+            const startBtn = document.getElementById('startButton');
+            const startBanner = document.getElementById('startBanner');
+            if (startBtn && startBanner) {
+                const btnObserver = new MutationObserver(() => {
+                    if (startBtn.style.display !== 'none') {
+                        startBanner.style.display = 'block';
+                    }
+                });
+                btnObserver.observe(startBtn, { attributes: true, attributeFilter: ['style'] });
+            }
         }
     </script>
 </body>

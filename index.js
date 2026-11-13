@@ -65,7 +65,6 @@ function releaseMediaResources() {
             vidEl.onended = null;
             vidEl.onerror = null;
             vidEl.removeAttribute("src");
-            vidEl.load(); // WebKit/Chromium command to release TV hardware decoders
         } catch (e) {}
         vidEl.style.display = "none";
     }
@@ -136,21 +135,36 @@ function showLoginDialog() {
     if (login_button) login_button.style.display = "flex";
 
     const mInput = document.getElementById("mirror_name");
-    if (mInput) {
-        mInput.value = "";
-        mInput.focus();
+    if (mInput && !mInput.value) {
+        try {
+            const saved = localStorage.getItem("mirror_saved_name");
+            if (saved) mInput.value = saved;
+        } catch (e) {}
     }
 }
 
-// Auto-connect when mirror_name is present in URL, otherwise show login dialog
+// Auto-connect when mirror_name is present in URL or stored in localStorage, otherwise show login dialog
 function initAutoConnect() {
     try {
-        const urlParams = new URLSearchParams(window.location.search);
-        const queryMirrorName = urlParams.get("mirror_name") || urlParams.get("name");
+        let queryMirrorName = "";
+        try {
+            const urlParams = new URLSearchParams(window.location.search);
+            queryMirrorName = urlParams.get("mirror_name") || urlParams.get("name") || "";
+        } catch (e) {
+            const match = window.location.search.match(/[?&](?:mirror_name|name)=([^&#]*)/i);
+            if (match) queryMirrorName = decodeURIComponent(match[1]);
+        }
+
+        // Check localStorage fallback for Smart TVs opened directly
+        if (!queryMirrorName || queryMirrorName.trim() === "") {
+            try {
+                queryMirrorName = localStorage.getItem("mirror_saved_name") || "";
+            } catch (e) {}
+        }
         
         if (queryMirrorName && queryMirrorName.trim() !== "") {
             const cleanName = queryMirrorName.trim();
-            console.log("Auto-connecting to mirror from URL parameter:", cleanName);
+            console.log("Auto-connecting to mirror:", cleanName);
             const mInput = document.getElementById("mirror_name");
             if (mInput) mInput.value = cleanName;
 
@@ -163,7 +177,7 @@ function initAutoConnect() {
             // Start immediately
             Login();
         } else {
-            console.log("No mirror_name in URL. Presenting mirror name dialog.");
+            console.log("No mirror_name configured. Presenting mirror name dialog.");
             showLoginDialog();
         }
     } catch (e) {
@@ -279,21 +293,31 @@ function Login(e) {
     });
 }
 
+let wsAvailable = true;
+
 function connectWebSocket(mirrorName) {
+    if (!wsAvailable) {
+        return;
+    }
+
     if (wsConnection) {
         try {
             wsConnection.onclose = null;
+            wsConnection.onerror = null;
             wsConnection.close();
         } catch (e) {}
     }
 
     const wsUrl = `${SERVER_WEBSOCKET_URL}mirror_name=${encodeURIComponent(mirrorName)}`;
-    console.log("[Mirror WebSocket] Connecting stream for:", mirrorName);
+    console.log("[Mirror WebSocket] Attempting stream connection for:", mirrorName);
+
+    let hasEverOpened = false;
 
     try {
         wsConnection = new WebSocket(wsUrl);
 
         wsConnection.onopen = () => {
+            hasEverOpened = true;
             console.log("[Mirror WebSocket] Connected to MirrorLink Server successfully for mirror:", mirrorName);
         };
 
@@ -340,19 +364,27 @@ function connectWebSocket(mirrorName) {
         };
 
         wsConnection.onerror = (err) => {
-            console.warn("[Mirror WebSocket] Connection notice:", err);
+            console.warn("[Mirror WebSocket] WebSocket unavailable, continuing with HTTP polling sync.");
         };
 
         wsConnection.onclose = () => {
-            console.log("[Mirror WebSocket] Connection closed. Auto-reconnecting in 5 seconds...");
-            setTimeout(() => {
-                if (savedMirrorName) {
-                    connectWebSocket(savedMirrorName);
-                }
-            }, 5000);
+            wsConnection = null;
+            if (!hasEverOpened) {
+                // If handshake failed on startup (e.g. HTTP 200 instead of 101), disable to avoid crashing Smart TV WebKit
+                console.log("[Mirror WebSocket] Endpoint does not support WebSocket handshake. Falling back to HTTP sync.");
+                wsAvailable = false;
+            } else {
+                // Reconnect conservatively after 20s if it previously worked
+                setTimeout(() => {
+                    if (savedMirrorName && !wsConnection && wsAvailable) {
+                        connectWebSocket(savedMirrorName);
+                    }
+                }, 20000);
+            }
         };
     } catch (e) {
-        console.error("[Mirror WebSocket] Failed to initialize:", e);
+        console.warn("[Mirror WebSocket] WebSocket init bypassed:", e);
+        wsAvailable = false;
     }
 }
 
@@ -486,7 +518,7 @@ function checkFullscreenKioskPrompt() {
     const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
     let prompt = document.getElementById("kiosk-fullscreen-prompt");
     if (isFs) {
-        if (prompt) prompt.remove();
+        if (prompt && prompt.parentNode) prompt.parentNode.removeChild(prompt);
         return;
     }
     if (!isSlideshowActive) return;
@@ -512,7 +544,7 @@ function enterFullscreen() {
     const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
     if (isFs) {
         const prompt = document.getElementById("kiosk-fullscreen-prompt");
-        if (prompt) prompt.remove();
+        if (prompt && prompt.parentNode) prompt.parentNode.removeChild(prompt);
         return;
     }
 
@@ -523,7 +555,7 @@ function enterFullscreen() {
             if (p && p.then) {
                 p.then(() => {
                     const prompt = document.getElementById("kiosk-fullscreen-prompt");
-                    if (prompt) prompt.remove();
+                    if (prompt && prompt.parentNode) prompt.parentNode.removeChild(prompt);
                     document.body.classList.add("hide-cursor");
                 }).catch(() => {
                     checkFullscreenKioskPrompt();
@@ -618,8 +650,8 @@ function setPlaybackState(targetState) {
         isPaused = false;
 
         const pauseIndicator = document.getElementById("mirror-pause-indicator");
-        if (pauseIndicator) {
-            pauseIndicator.remove();
+        if (pauseIndicator && pauseIndicator.parentNode) {
+            pauseIndicator.parentNode.removeChild(pauseIndicator);
         }
 
         if (wasPaused && isSlideshowActive && rawContents.length > 0) {
@@ -705,11 +737,12 @@ function showCurrentFile(shouldBroadcast = true) {
             } catch (e) {}
 
             vidEl.src = currentUrl;
-            try {
-                vidEl.load();
-            } catch (e) {}
 
             const handleVideoNext = () => {
+                if (slideshowTimer) {
+                    clearTimeout(slideshowTimer);
+                    slideshowTimer = null;
+                }
                 if (!isPaused && isSlideshowActive) {
                     currentIndex = (currentIndex + 1) % rawContents.length;
                     showCurrentFile(true);
@@ -722,27 +755,35 @@ function showCurrentFile(shouldBroadcast = true) {
             vidEl.onerror = (e) => {
                 console.warn("[Smart TV Video] Video decode/network error:", e);
                 if (slideshowTimer) clearTimeout(slideshowTimer);
-                slideshowTimer = setTimeout(handleVideoNext, 3000);
+                slideshowTimer = setTimeout(handleVideoNext, 2500);
             };
+
+            // Watchdog timer: If video has duration 0 or ends without triggering onended, advance safely
+            const maxVidDuration = (currentItem.duration && Number(currentItem.duration) > 0)
+                ? Number(currentItem.duration)
+                : (mirrorPhotoDuration || 10);
+            slideshowTimer = setTimeout(() => {
+                console.log("[Smart TV Video] Video watchdog timeout reached, advancing slide.");
+                handleVideoNext();
+            }, Math.max(4, maxVidDuration + 1) * 1000);
 
             const playPromise = vidEl.play();
             if (playPromise !== undefined) {
                 playPromise.catch((err) => {
                     console.warn("[Smart TV Video] Autoplay blocked or error:", err);
                     if (slideshowTimer) clearTimeout(slideshowTimer);
-                    slideshowTimer = setTimeout(handleVideoNext, 4000);
+                    slideshowTimer = setTimeout(handleVideoNext, 3000);
                 });
             }
         }
     } else {
-        // Showing photo: Immediately free video hardware decoder and video buffer from TV firmware
+        // Showing photo: Safely unload video decoder without calling .load()
         if (vidEl) {
             try {
                 vidEl.pause();
                 vidEl.onended = null;
                 vidEl.onerror = null;
                 vidEl.removeAttribute("src");
-                vidEl.load(); // Releases hardware video decoder
             } catch (e) {}
             vidEl.style.display = "none";
         }
@@ -778,7 +819,7 @@ function showCurrentFile(shouldBroadcast = true) {
         const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
         const prompt = document.getElementById("kiosk-fullscreen-prompt");
         if (isFs) {
-            if (prompt) prompt.remove();
+            if (prompt && prompt.parentNode) prompt.parentNode.removeChild(prompt);
             document.body.classList.add("hide-cursor");
         } else if (isSlideshowActive) {
             checkFullscreenKioskPrompt();
