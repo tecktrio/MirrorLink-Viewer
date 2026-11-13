@@ -51,6 +51,7 @@ function getSlideshowVideo() {
 
 // Critical for Smart TVs: Force release of hardware video decoder & GPU bitmap memory
 function releaseMediaResources() {
+    pauseKeepAwakeMedia();
     if (slideshowTimer) {
         clearTimeout(slideshowTimer);
         slideshowTimer = null;
@@ -83,6 +84,100 @@ function updateSyncProgress(msg) {
     const syncStatusText = document.getElementById("sync_status_text");
     if (syncStatusText) {
         syncStatusText.textContent = msg;
+    }
+}
+
+// ==========================================
+// Kiosk Display Keep-Awake / Anti-Screensaver Engine
+// ==========================================
+let screenWakeLock = null;
+let keepAwakeVideoEl = null;
+
+function requestScreenWakeLock() {
+    // 1. Standard W3C Screen Wake Lock API (Chrome, Safari iOS 16.4+, Android TV, modern webOS)
+    if ('wakeLock' in navigator && typeof navigator.wakeLock.request === 'function') {
+        try {
+            navigator.wakeLock.request('screen').then(lock => {
+                screenWakeLock = lock;
+                console.log("[KeepAwake] Standard Screen Wake Lock acquired.");
+                screenWakeLock.addEventListener('release', () => {
+                    screenWakeLock = null;
+                    if (document.visibilityState === 'visible' && isSlideshowActive) {
+                        requestScreenWakeLock();
+                    }
+                });
+            }).catch(err => {
+                console.warn("[KeepAwake] Wake Lock request:", err);
+            });
+        } catch (e) { }
+    }
+
+    // 2. Samsung Tizen TV Native Power API
+    try {
+        if (window.tizen && window.tizen.power && typeof window.tizen.power.request === 'function') {
+            window.tizen.power.request('SCREEN', 'SCREEN_NORMAL');
+            console.log("[KeepAwake] Samsung Tizen SCREEN_NORMAL power lock requested.");
+        }
+    } catch (e) { }
+
+    // 3. LG webOS TV Native Power API
+    try {
+        if (window.webOS && typeof window.webOS.service === 'object' && typeof window.webOS.service.request === 'function') {
+            window.webOS.service.request('luna://com.webos.service.tv.power', {
+                method: 'turnOffScreenSaver',
+                parameters: {},
+                onSuccess: function () { },
+                onFailure: function () { }
+            });
+        }
+    } catch (e) { }
+}
+
+function getKeepAwakeVideo() {
+    if (!keepAwakeVideoEl) {
+        keepAwakeVideoEl = document.getElementById("keepAwakeVideo");
+        if (!keepAwakeVideoEl) {
+            keepAwakeVideoEl = document.createElement("video");
+            keepAwakeVideoEl.id = "keepAwakeVideo";
+            keepAwakeVideoEl.muted = true;
+            keepAwakeVideoEl.playsInline = true;
+            keepAwakeVideoEl.setAttribute("playsinline", "");
+            keepAwakeVideoEl.setAttribute("webkit-playsinline", "");
+            keepAwakeVideoEl.loop = true;
+            keepAwakeVideoEl.setAttribute("loop", "");
+            keepAwakeVideoEl.preload = "auto";
+            keepAwakeVideoEl.src = "keepawake.mp4";
+            keepAwakeVideoEl.style.cssText = "position:fixed;bottom:0;right:0;width:1px;height:1px;opacity:0.01;pointer-events:none;z-index:-1;";
+            document.body.appendChild(keepAwakeVideoEl);
+        }
+    }
+    return keepAwakeVideoEl;
+}
+
+function startKeepAwakeMedia() {
+    try {
+        const v = getKeepAwakeVideo();
+        if (v && v.paused) {
+            v.play().catch(() => { });
+        }
+    } catch (e) { }
+}
+
+function pauseKeepAwakeMedia() {
+    try {
+        if (keepAwakeVideoEl && !keepAwakeVideoEl.paused) {
+            keepAwakeVideoEl.pause();
+        }
+    } catch (e) { }
+}
+
+function enableKeepAwake() {
+    requestScreenWakeLock();
+    // Only start background keep-awake video if not already showing an active video slide
+    const vidEl = getSlideshowVideo();
+    const isPlayingSlideVideo = vidEl && vidEl.style.display !== "none" && !vidEl.paused;
+    if (!isPlayingSlideVideo) {
+        startKeepAwakeMedia();
     }
 }
 
@@ -513,6 +608,7 @@ function enterFullscreen() {
 function startSlideshow() {
     isSlideshowActive = true;
     document.body.classList.add("slideshow-active", "hide-cursor");
+    enableKeepAwake();
 
     const slideshowContainer = document.getElementById("slideshowContainer");
     const login_container = document.getElementById("login_container");
@@ -651,6 +747,8 @@ function showCurrentFile(shouldBroadcast = true) {
     const vidEl = getSlideshowVideo();
 
     if (isVideo) {
+        pauseKeepAwakeMedia();
+        requestScreenWakeLock();
         // Free image memory from GPU/RAM
         if (imgEl) {
             imgEl.onload = null;
@@ -699,7 +797,10 @@ function showCurrentFile(shouldBroadcast = true) {
             }
         }
     } else {
-        // Showing photo: Immediately free video hardware decoder and video buffer from TV firmware
+        // Showing photo: Ensure keep-awake video is active to prevent TV screensaver
+        startKeepAwakeMedia();
+        requestScreenWakeLock();
+        // Immediately free video hardware decoder and video buffer from TV firmware
         if (vidEl) {
             try {
                 vidEl.pause();
@@ -730,14 +831,15 @@ function showCurrentFile(shouldBroadcast = true) {
     }
 }
 
-// User Gesture listeners for kiosk full-screen (use click and touchend for reliable WebKit activation)
+// User Gesture listeners for kiosk full-screen and keep-awake activation
 ["click", "touchend"].forEach(evt => {
     document.addEventListener(evt, () => {
         enterFullscreen();
+        enableKeepAwake();
     }, { passive: true });
 });
 
-["fullscreenchange", "webkitfullscreenchange", "mozfullscreenchange", "MSFullscreenChange"].forEach(evt => {
+["visibilitychange", "fullscreenchange", "webkitfullscreenchange", "mozfullscreenchange", "MSFullscreenChange"].forEach(evt => {
     document.addEventListener(evt, () => {
         const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
         const prompt = document.getElementById("kiosk-fullscreen-prompt");
@@ -747,10 +849,14 @@ function showCurrentFile(shouldBroadcast = true) {
         } else if (isSlideshowActive) {
             checkFullscreenKioskPrompt();
         }
+        if (document.visibilityState === "visible" && isSlideshowActive) {
+            enableKeepAwake();
+        }
     });
 });
 
 document.addEventListener("keydown", (e) => {
+    enableKeepAwake();
     if (isSlideshowActive) {
         enterFullscreen();
         if (e.key === "p" || e.key === "P" || e.key === " ") {
@@ -779,3 +885,10 @@ document.addEventListener("mousemove", () => {
         }
     }, 2000);
 });
+
+// Periodic keep-awake watchdog: ensures screen saver / display sleep remains suppressed indefinitely
+setInterval(() => {
+    if (isSlideshowActive && !isPaused) {
+        enableKeepAwake();
+    }
+}, 30000);
