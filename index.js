@@ -1,25 +1,85 @@
-let db;
-let files = [];
 let currentIndex = 0;
 let initialServerIndex = 0;
-let ContentElement = [];
-let key = "";
-
 let savedMirrorName = "";
 let wsConnection = null;
 let slideshowTimer = null;
-let currentVideoElement = null;
 let isSlideshowActive = false;
 let isReloading = false;
 let isPaused = false;
 let rawContents = [];
 let lastKnownTimestamp = 0;
 let lastKnownSyncTimestamp = 0;
-let pollInterval = null;
+let pollTimeout = null;
 let mirrorPhotoDuration = 5;
 
 const SERVER_URL = "https://mirrorlink.bigburry.com/api/Mirror";
 const SERVER_WEBSOCKET_URL = "wss://mirrorlink.bigburry.com/mirror?";
+
+// Low-RAM Smart TV Architecture: Single Reusable DOM Elements
+function getSlideshowImage() {
+    let img = document.getElementById("slideshowImage");
+    if (!img) {
+        const container = document.getElementById("slideshowContainer");
+        if (container) {
+            img = document.createElement("img");
+            img.id = "slideshowImage";
+            img.style.display = "none";
+            container.appendChild(img);
+        }
+    }
+    return img;
+}
+
+function getSlideshowVideo() {
+    let vid = document.getElementById("slideshowVideo");
+    if (!vid) {
+        const container = document.getElementById("slideshowContainer");
+        if (container) {
+            vid = document.createElement("video");
+            vid.id = "slideshowVideo";
+            vid.muted = true;
+            vid.autoplay = true;
+            vid.controls = false;
+            vid.loop = false;
+            vid.playsInline = true;
+            vid.setAttribute("playsinline", "");
+            vid.setAttribute("webkit-playsinline", "");
+            vid.style.display = "none";
+            container.appendChild(vid);
+        }
+    }
+    return vid;
+}
+
+// Critical for Smart TVs: Force release of hardware video decoder & GPU bitmap memory
+function releaseMediaResources() {
+    if (slideshowTimer) {
+        clearTimeout(slideshowTimer);
+        slideshowTimer = null;
+    }
+
+    const vidEl = getSlideshowVideo();
+    if (vidEl) {
+        try {
+            vidEl.pause();
+            vidEl.onended = null;
+            vidEl.onerror = null;
+            vidEl.removeAttribute("src");
+            vidEl.load(); // WebKit/Chromium command to release TV hardware decoders
+        } catch (e) {}
+        vidEl.style.display = "none";
+    }
+
+    const imgEl = getSlideshowImage();
+    if (imgEl) {
+        try {
+            imgEl.onload = null;
+            imgEl.onerror = null;
+            imgEl.removeAttribute("src"); // Releases GPU bitmap memory
+        } catch (e) {}
+        imgEl.style.display = "none";
+    }
+}
 
 function updateSyncProgress(msg) {
     const syncStatusText = document.getElementById("sync_status_text");
@@ -29,10 +89,14 @@ function updateSyncProgress(msg) {
 }
 
 function showStandbyScreen() {
-    const loadingText = document.getElementById('loadingText');
-    const startBanner = document.getElementById('startBanner');
-    const loginContainer = document.getElementById('login_container');
-    const slideshowContainer = document.getElementById('slideshowContainer');
+    releaseMediaResources();
+    isSlideshowActive = false;
+    document.body.classList.remove("slideshow-active");
+
+    const loadingText = document.getElementById("loadingText");
+    const startBanner = document.getElementById("startBanner");
+    const loginContainer = document.getElementById("login_container");
+    const slideshowContainer = document.getElementById("slideshowContainer");
 
     if (slideshowContainer) slideshowContainer.style.display = "none";
     if (loginContainer) loginContainer.style.display = "flex";
@@ -48,24 +112,28 @@ function showStandbyScreen() {
                 <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">Awaiting media contents from MirrorLink setup.<br>Presentation starts automatically once media is assigned.</p>
             </div>
         `;
-        startBanner.style.display = 'block';
+        startBanner.style.display = "block";
     }
 }
 
 function showLoginDialog() {
-    const loginContainer = document.getElementById('login_container');
-    const loadingText = document.getElementById('loadingText');
-    const startBanner = document.getElementById('startBanner');
+    releaseMediaResources();
+    isSlideshowActive = false;
+    document.body.classList.remove("slideshow-active");
+
+    const loginContainer = document.getElementById("login_container");
+    const loadingText = document.getElementById("loadingText");
+    const startBanner = document.getElementById("startBanner");
     const loading_button = document.getElementById("loading_button");
     const login_button = document.getElementById("login_button");
-    const slideshowContainer = document.getElementById('slideshowContainer');
+    const slideshowContainer = document.getElementById("slideshowContainer");
 
-    if (slideshowContainer) slideshowContainer.style.display = 'none';
-    if (loginContainer) loginContainer.style.display = 'flex';
-    if (loadingText) loadingText.style.display = 'block';
-    if (startBanner) startBanner.style.display = 'none';
-    if (loading_button) loading_button.style.display = 'none';
-    if (login_button) login_button.style.display = 'flex';
+    if (slideshowContainer) slideshowContainer.style.display = "none";
+    if (loginContainer) loginContainer.style.display = "flex";
+    if (loadingText) loadingText.style.display = "block";
+    if (startBanner) startBanner.style.display = "none";
+    if (loading_button) loading_button.style.display = "none";
+    if (login_button) login_button.style.display = "flex";
 
     const mInput = document.getElementById("mirror_name");
     if (mInput) {
@@ -78,9 +146,9 @@ function showLoginDialog() {
 function initAutoConnect() {
     try {
         const urlParams = new URLSearchParams(window.location.search);
-        const queryMirrorName = urlParams.get('mirror_name') || urlParams.get('name');
+        const queryMirrorName = urlParams.get("mirror_name") || urlParams.get("name");
         
-        if (queryMirrorName && queryMirrorName.trim() !== '') {
+        if (queryMirrorName && queryMirrorName.trim() !== "") {
             const cleanName = queryMirrorName.trim();
             console.log("Auto-connecting to mirror from URL parameter:", cleanName);
             const mInput = document.getElementById("mirror_name");
@@ -88,8 +156,8 @@ function initAutoConnect() {
 
             const loading_button = document.getElementById("loading_button");
             const login_button = document.getElementById("login_button");
-            if (loading_button) loading_button.style.display = 'flex';
-            if (login_button) login_button.style.display = 'none';
+            if (loading_button) loading_button.style.display = "flex";
+            if (login_button) login_button.style.display = "none";
             updateSyncProgress(`Connecting to ${cleanName}...`);
 
             // Start immediately
@@ -104,8 +172,8 @@ function initAutoConnect() {
     }
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initAutoConnect);
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initAutoConnect);
 } else {
     initAutoConnect();
 }
@@ -114,7 +182,6 @@ function Login(e) {
     console.log("Connecting mirror stream by name...");
     if (e) {
         if (e.preventDefault) e.preventDefault();
-        // User gesture detected: immediately request fullscreen
         enterFullscreen();
     }
 
@@ -124,32 +191,30 @@ function Login(e) {
     const loading_button = document.getElementById("loading_button");
     const login_button = document.getElementById("login_button");
 
-    if (loading_button) loading_button.style.display = 'flex';
-    if (login_button) login_button.style.display = 'none';
-    updateSyncProgress(`Connecting to ${mirrorName}...`);
-
     if (!mirrorName) {
         alert("Mirror Name is required.");
-        if (loading_button) loading_button.style.display = 'none';
-        if (login_button) login_button.style.display = 'flex';
+        if (loading_button) loading_button.style.display = "none";
+        if (login_button) login_button.style.display = "flex";
         return;
     }
 
+    if (loading_button) loading_button.style.display = "flex";
+    if (login_button) login_button.style.display = "none";
+    updateSyncProgress(`Connecting to ${mirrorName}...`);
+
     savedMirrorName = mirrorName;
     try {
-        localStorage.setItem('mirror_saved_name', mirrorName);
+        localStorage.setItem("mirror_saved_name", mirrorName);
     } catch (err) {}
 
-    let request_data = {
-        'mirror_name': mirrorName,
-        'service': 'login'
+    const request_data = {
+        mirror_name: mirrorName,
+        service: "login"
     };
 
     fetch(SERVER_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request_data)
     })
     .then(response => response.json())
@@ -157,33 +222,31 @@ function Login(e) {
         if (data.status_code === 401 || data.status_code === 400 || data.status_code === 404) {
             if (errorText) {
                 errorText.innerHTML = data.status_text || `Mirror "${mirrorName}" not found. Check the mirror name.`;
-                errorText.style.display = 'block';
+                errorText.style.display = "block";
             }
-            if (loading_button) loading_button.style.display = 'none';
-            if (login_button) login_button.style.display = 'flex';
+            if (loading_button) loading_button.style.display = "none";
+            if (login_button) login_button.style.display = "flex";
             return;
         }
 
         console.log(`Mirror stream "${mirrorName}" connected successfully.`);
-        if (errorText) errorText.style.display = 'none';
+        if (errorText) errorText.style.display = "none";
 
-        // Connect real-time WebSocket and polling fallback for remote refresh messages
+        // Connect real-time WebSocket and adaptive polling fallback
         connectWebSocket(mirrorName);
         startPollingFallback();
 
         if (data.photo_duration) {
             mirrorPhotoDuration = Number(data.photo_duration);
-            console.log("Configured mirror photo transition duration:", mirrorPhotoDuration, "seconds");
         }
         if (data.active_content_index !== undefined) {
             initialServerIndex = Number(data.active_content_index);
             currentIndex = initialServerIndex;
-            console.log("Synchronized to server slide index:", currentIndex);
         }
         if (data.sync_timestamp) {
             lastKnownSyncTimestamp = data.sync_timestamp;
         }
-        if (data.playback_state === 'paused') {
+        if (data.playback_state === "paused") {
             isPaused = true;
         }
 
@@ -195,25 +258,24 @@ function Login(e) {
             return;
         }
 
-        console.log(`Loaded ${rawContents.length} media item(s). Starting presentation immediately.`);
-        ContentElement = createElementsFromContents(rawContents);
-        if (initialServerIndex !== undefined && ContentElement.length > 0) {
-            currentIndex = initialServerIndex % ContentElement.length;
+        console.log(`Loaded ${rawContents.length} media item(s). Starting slideshow immediately.`);
+        if (initialServerIndex !== undefined && rawContents.length > 0) {
+            currentIndex = initialServerIndex % rawContents.length;
         } else {
             currentIndex = 0;
         }
 
-        // Start presentation immediately without waiting
+        // Start presentation immediately
         startSlideshow();
     })
     .catch((error) => {
         console.error("Mirror connect error:", error);
         if (errorText) {
             errorText.innerText = "Network connection error: " + error.message;
-            errorText.style.display = 'block';
+            errorText.style.display = "block";
         }
-        if (loading_button) loading_button.style.display = 'none';
-        if (login_button) login_button.style.display = 'flex';
+        if (loading_button) loading_button.style.display = "none";
+        if (login_button) login_button.style.display = "flex";
     });
 }
 
@@ -236,55 +298,39 @@ function connectWebSocket(mirrorName) {
         };
 
         wsConnection.onmessage = (event) => {
-            console.log("[Mirror WebSocket] Message received:", event.data);
             try {
                 const message = JSON.parse(event.data);
                 const payload = message.data !== undefined ? message.data : message;
                 const service = message.service || (payload && payload.service);
 
-                if (service === 'ReloadContents' || service === 'ReloadMirror' || service === 'refresh' || service === 'RefreshMirror') {
+                if (service === "ReloadContents" || service === "ReloadMirror" || service === "refresh" || service === "RefreshMirror") {
                     console.log("[Mirror WebSocket] Reload trigger received! Reloading new contents...");
                     const incomingList = Array.isArray(payload) ? payload : (payload && payload.contents ? payload.contents : null);
                     reloadMirrorContents(incomingList);
-                } else if (service === 'PlaybackControl') {
+                } else if (service === "PlaybackControl") {
                     const action = payload.action;
                     console.log("[Mirror WebSocket] Playback control signal received:", action);
-                    setPlaybackState(action === 'pause' || action === 'paused' ? 'paused' : 'playing');
-                } else if (service === 'SyncSlide') {
+                    setPlaybackState(action === "pause" || action === "paused" ? "paused" : "playing");
+                } else if (service === "SyncSlide") {
                     const targetIndex = payload.index;
-                    console.log("[Mirror WebSocket] Sync slide signal received:", targetIndex, payload);
-                    if (targetIndex !== undefined && ContentElement.length > 0) {
-                        const newIdx = Number(targetIndex) % ContentElement.length;
+                    console.log("[Mirror WebSocket] Sync slide signal received:", targetIndex);
+                    if (targetIndex !== undefined && rawContents.length > 0) {
+                        const newIdx = Number(targetIndex) % rawContents.length;
                         if (newIdx !== currentIndex) {
                             currentIndex = newIdx;
                             if (!isPaused && isSlideshowActive) {
                                 showCurrentFile(false); // don't re-broadcast on remote sync
                             }
-                        } else {
-                            // Align local slideshow timer with remote sync timing
-                            if (slideshowTimer) clearTimeout(slideshowTimer);
-                            if (!isPaused && isSlideshowActive) {
-                                const activeMeta = rawContents && rawContents[currentIndex];
-                                const durationSec = (activeMeta && activeMeta.duration) ? Number(activeMeta.duration) : (mirrorPhotoDuration || 5);
-                                slideshowTimer = setTimeout(() => {
-                                    if (!isPaused) {
-                                        currentIndex = (currentIndex + 1) % ContentElement.length;
-                                        showCurrentFile(true);
-                                    }
-                                }, Math.max(1, durationSec) * 1000);
-                            }
                         }
                     }
-                } else if (service === 'UpdateSettings' || service === 'SetPhotoSpeed') {
+                } else if (service === "UpdateSettings" || service === "SetPhotoSpeed") {
                     if (payload && payload.photo_duration) {
                         mirrorPhotoDuration = Number(payload.photo_duration);
-                        console.log("[Mirror WebSocket] Updated photo transition duration to:", mirrorPhotoDuration, "seconds");
                     }
                     if (payload && payload.content_id && payload.duration && rawContents) {
                         const target = rawContents.find(c => String(c._id) === String(payload.content_id));
                         if (target) {
                             target.duration = Number(payload.duration);
-                            console.log("[Mirror WebSocket] Updated photo duration for content:", target._id, "to", target.duration, "s");
                         }
                     }
                 }
@@ -298,65 +344,73 @@ function connectWebSocket(mirrorName) {
         };
 
         wsConnection.onclose = () => {
-            console.log("[Mirror WebSocket] Connection closed. Auto-reconnecting in 4 seconds...");
+            console.log("[Mirror WebSocket] Connection closed. Auto-reconnecting in 5 seconds...");
             setTimeout(() => {
                 if (savedMirrorName) {
                     connectWebSocket(savedMirrorName);
                 }
-            }, 4000);
+            }, 5000);
         };
     } catch (e) {
         console.error("[Mirror WebSocket] Failed to initialize:", e);
     }
 }
 
+// Low-overhead adaptive polling: Only polls when needed to avoid CPU & memory thrashing on Smart TVs
 function startPollingFallback() {
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(() => {
-        if (!savedMirrorName || isReloading) return;
+    if (pollTimeout) clearTimeout(pollTimeout);
+
+    function pollStep() {
+        if (!savedMirrorName || isReloading) {
+            scheduleNextPoll(10000);
+            return;
+        }
+
+        const isWsActive = wsConnection && wsConnection.readyState === WebSocket.OPEN;
+        // If WebSocket is alive, poll very infrequently (15s); if disconnected, check every 5s
+        const nextDelay = isWsActive ? 15000 : 5000;
 
         fetch(SERVER_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 mirror_name: savedMirrorName,
-                service: 'CheckMirrorUpdate'
+                service: "CheckMirrorUpdate"
             })
         })
         .then(res => res.json())
         .then(resData => {
-            if (!resData) return;
+            if (!resData) {
+                scheduleNextPoll(nextDelay);
+                return;
+            }
 
             // 1. Refresh detection
             if (resData.last_refresh_timestamp) {
                 if (lastKnownTimestamp === 0) {
                     lastKnownTimestamp = resData.last_refresh_timestamp;
                 } else if (resData.last_refresh_timestamp > lastKnownTimestamp) {
-                    console.log("[Mirror Poll] New refresh timestamp detected:", resData.last_refresh_timestamp);
                     lastKnownTimestamp = resData.last_refresh_timestamp;
                     reloadMirrorContents(resData.data);
                     return;
                 }
             }
 
-            // 2. Playback state detection (Pause / Play)
+            // 2. Playback state detection
             if (resData.playback_state) {
-                if (resData.playback_state === 'paused' && !isPaused) {
-                    console.log("[Mirror Poll] Detected paused state from server");
-                    setPlaybackState('paused');
-                } else if (resData.playback_state === 'playing' && isPaused) {
-                    console.log("[Mirror Poll] Detected playing state from server");
-                    setPlaybackState('playing');
+                if (resData.playback_state === "paused" && !isPaused) {
+                    setPlaybackState("paused");
+                } else if (resData.playback_state === "playing" && isPaused) {
+                    setPlaybackState("playing");
                 }
             }
 
             // 3. Slide sync detection
             if (resData.sync_timestamp && resData.sync_timestamp > lastKnownSyncTimestamp) {
                 lastKnownSyncTimestamp = resData.sync_timestamp;
-                if (resData.active_content_index !== undefined && ContentElement.length > 0) {
-                    const newIdx = Number(resData.active_content_index) % ContentElement.length;
+                if (resData.active_content_index !== undefined && rawContents.length > 0) {
+                    const newIdx = Number(resData.active_content_index) % rawContents.length;
                     if (newIdx !== currentIndex) {
-                        console.log("[Mirror Poll] Synchronizing to index:", newIdx);
                         currentIndex = newIdx;
                         if (!isPaused && isSlideshowActive) {
                             showCurrentFile(false);
@@ -365,91 +419,42 @@ function startPollingFallback() {
                 }
             }
 
-            // 4. Photo speed / duration detection
+            // 4. Photo speed
             if (resData.photo_duration) {
                 mirrorPhotoDuration = Number(resData.photo_duration);
             }
+
+            scheduleNextPoll(nextDelay);
         })
-        .catch(() => {});
-    }, 2500);
-}
+        .catch(() => {
+            scheduleNextPoll(nextDelay);
+        });
+    }
 
-function createElementsFromContents(contents) {
-    if (!contents || !Array.isArray(contents)) return [];
+    function scheduleNextPoll(delay) {
+        if (pollTimeout) clearTimeout(pollTimeout);
+        pollTimeout = setTimeout(pollStep, delay);
+    }
 
-    return contents.map((item) => {
-        if (!item || !item.content_url) return null;
-        const url = item.content_url;
-        const isVideo = (item.content_format && item.content_format.toLowerCase().includes('video')) ||
-                        /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(url);
-
-        if (isVideo) {
-            const video = document.createElement('video');
-            video.src = url;
-            video.controls = false;
-            video.loop = false;
-            video.autoplay = true;
-            video.muted = true;
-            video.playsInline = true;
-            video.setAttribute('playsinline', '');
-            video.setAttribute('webkit-playsinline', '');
-            video.style.width = "100vw";
-            video.style.height = "100vh";
-            video.style.objectFit = "cover";
-            video.style.position = "fixed";
-            video.style.top = "0";
-            video.style.left = "0";
-            video.style.zIndex = "10";
-            video.style.background = "#000";
-            video.preload = "auto";
-            return video;
-        } else {
-            const img = document.createElement('img');
-            img.src = url;
-            img.style.width = "100vw";
-            img.style.height = "100vh";
-            img.style.objectFit = "cover";
-            img.style.position = "fixed";
-            img.style.top = "0";
-            img.style.left = "0";
-            img.style.zIndex = "10";
-            img.style.background = "#000";
-            return img;
-        }
-    }).filter(Boolean);
+    scheduleNextPoll(6000);
 }
 
 function reloadMirrorContents(incomingContents) {
-    if (isReloading) {
-        console.log("Reload already in progress, skipping duplicate call...");
-        return;
-    }
+    if (isReloading) return;
     isReloading = true;
     console.log("Starting mirror reload & restart sequence...");
 
-    // 1. Immediately pause and clear existing playback timers and video streams
-    if (slideshowTimer) {
-        clearTimeout(slideshowTimer);
-        slideshowTimer = null;
-    }
-    if (currentVideoElement) {
-        try {
-            currentVideoElement.pause();
-            currentVideoElement.onended = null;
-            currentVideoElement.src = "";
-        } catch (e) {}
-        currentVideoElement = null;
-    }
+    // Immediately pause and release TV hardware video decoders
+    releaseMediaResources();
 
-    // 2. Fetch fresh content list if not provided directly
-    const fetchFreshPromise = incomingContents && Array.isArray(incomingContents)
+    const fetchFreshPromise = (incomingContents && Array.isArray(incomingContents))
         ? Promise.resolve(incomingContents)
         : fetch(SERVER_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 mirror_name: savedMirrorName,
-                service: 'login'
+                service: "login"
             })
         })
         .then(res => res.json())
@@ -464,17 +469,9 @@ function reloadMirrorContents(incomingContents) {
         rawContents = (contents || []).filter(item => item && item.content_url && item.is_active !== false);
         console.log(`Fetched ${rawContents.length} fresh content item(s) for mirror.`);
 
-        ContentElement = createElementsFromContents(rawContents);
-
-        const slideshowContainer = document.getElementById('slideshowContainer');
-        if (slideshowContainer) {
-            slideshowContainer.innerHTML = '';
-        }
-
-        // If mirror has content, immediately launch/refresh presentation
-        if (ContentElement.length > 0) {
-            if (initialServerIndex !== undefined && ContentElement.length > 0) {
-                currentIndex = initialServerIndex % ContentElement.length;
+        if (rawContents.length > 0) {
+            if (initialServerIndex !== undefined && rawContents.length > 0) {
+                currentIndex = initialServerIndex % rawContents.length;
             } else {
                 currentIndex = 0;
             }
@@ -487,7 +484,7 @@ function reloadMirrorContents(incomingContents) {
 
 function checkFullscreenKioskPrompt() {
     const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-    let prompt = document.getElementById('kiosk-fullscreen-prompt');
+    let prompt = document.getElementById("kiosk-fullscreen-prompt");
     if (isFs) {
         if (prompt) prompt.remove();
         return;
@@ -495,14 +492,14 @@ function checkFullscreenKioskPrompt() {
     if (!isSlideshowActive) return;
 
     if (!prompt) {
-        prompt = document.createElement('div');
-        prompt.id = 'kiosk-fullscreen-prompt';
-        prompt.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:rgba(15,23,42,0.9);backdrop-filter:blur(12px);border:1px solid rgba(168,85,247,0.6);color:#f8fafc;padding:10px 22px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:600;letter-spacing:0.02em;display:flex;align-items:center;gap:10px;box-shadow:0 12px 32px rgba(0,0,0,0.6);cursor:pointer;user-select:none;transition:all 0.2s ease;";
+        prompt = document.createElement("div");
+        prompt.id = "kiosk-fullscreen-prompt";
+        prompt.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:rgba(15,23,42,0.9);border:1px solid rgba(168,85,247,0.6);color:#f8fafc;padding:10px 22px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;box-shadow:0 12px 32px rgba(0,0,0,0.6);cursor:pointer;user-select:none;";
         prompt.innerHTML = `
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
             <span>Tap / Click anywhere for Kiosk Full-Screen</span>
         `;
-        prompt.addEventListener('click', (e) => {
+        prompt.addEventListener("click", (e) => {
             e.stopPropagation();
             enterFullscreen();
         });
@@ -514,7 +511,7 @@ function enterFullscreen() {
     const docEl = document.documentElement;
     const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
     if (isFs) {
-        const prompt = document.getElementById('kiosk-fullscreen-prompt');
+        const prompt = document.getElementById("kiosk-fullscreen-prompt");
         if (prompt) prompt.remove();
         return;
     }
@@ -525,17 +522,15 @@ function enterFullscreen() {
             const p = req.call(docEl);
             if (p && p.then) {
                 p.then(() => {
-                    const prompt = document.getElementById('kiosk-fullscreen-prompt');
+                    const prompt = document.getElementById("kiosk-fullscreen-prompt");
                     if (prompt) prompt.remove();
-                    document.body.classList.add('hide-cursor');
-                }).catch(err => {
-                    console.log("Fullscreen request notice:", err.message);
+                    document.body.classList.add("hide-cursor");
+                }).catch(() => {
                     checkFullscreenKioskPrompt();
                 });
             }
         }
     } catch (e) {
-        console.warn("Fullscreen request error:", e);
         checkFullscreenKioskPrompt();
     }
 }
@@ -543,27 +538,27 @@ function enterFullscreen() {
 function startSlideshow() {
     isSlideshowActive = true;
     enterFullscreen();
-    document.body.classList.add('hide-cursor');
+    document.body.classList.add("slideshow-active", "hide-cursor");
 
-    const slideshowContainer = document.getElementById('slideshowContainer');
-    const login_container = document.getElementById('login_container');
+    const slideshowContainer = document.getElementById("slideshowContainer");
+    const login_container = document.getElementById("login_container");
 
-    if (login_container) login_container.style.display = 'none';
-    if (slideshowContainer) slideshowContainer.style.display = 'block';
+    if (login_container) login_container.style.display = "none";
+    if (slideshowContainer) slideshowContainer.style.display = "flex";
 
-    if (!ContentElement || ContentElement.length === 0) {
+    if (!rawContents || rawContents.length === 0) {
         showStandbyScreen();
         return;
     }
 
-    if (initialServerIndex !== undefined && ContentElement.length > 0) {
-        currentIndex = initialServerIndex % ContentElement.length;
+    if (initialServerIndex !== undefined && rawContents.length > 0) {
+        currentIndex = initialServerIndex % rawContents.length;
     } else {
         currentIndex = 0;
     }
+
     showCurrentFile();
 
-    // Verify fullscreen activation; if browser blocked auto-fullscreen without gesture, present prompt
     setTimeout(() => {
         enterFullscreen();
     }, 400);
@@ -573,7 +568,7 @@ function reportActiveSlide(contentId, index) {
     if (!savedMirrorName) return;
 
     const payload = {
-        service: 'UpdateActiveSlide',
+        service: "UpdateActiveSlide",
         mirror_name: savedMirrorName,
         content_id: contentId || null,
         index: index !== undefined ? index : 0
@@ -586,32 +581,32 @@ function reportActiveSlide(contentId, index) {
     }
 
     fetch(SERVER_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
     }).catch(() => {});
 }
 
 function setPlaybackState(targetState) {
-    const shouldPause = (targetState === 'paused' || targetState === 'pause');
+    const shouldPause = (targetState === "paused" || targetState === "pause");
     if (shouldPause) {
         isPaused = true;
         if (slideshowTimer) {
             clearTimeout(slideshowTimer);
             slideshowTimer = null;
         }
-        if (currentVideoElement) {
-            try {
-                currentVideoElement.pause();
-            } catch (e) {}
+
+        const vidEl = getSlideshowVideo();
+        if (vidEl && vidEl.style.display !== "none") {
+            try { vidEl.pause(); } catch (e) {}
         }
 
-        let pauseIndicator = document.getElementById('mirror-pause-indicator');
+        let pauseIndicator = document.getElementById("mirror-pause-indicator");
         if (!pauseIndicator) {
-            pauseIndicator = document.createElement('div');
-            pauseIndicator.id = 'mirror-pause-indicator';
+            pauseIndicator = document.createElement("div");
+            pauseIndicator.id = "mirror-pause-indicator";
             pauseIndicator.innerHTML = `
-                <div style="position:fixed;top:24px;right:24px;z-index:99999;background:rgba(15,23,42,0.85);backdrop-filter:blur(12px);border:1px solid rgba(251,191,36,0.6);color:#fbbf24;padding:8px 18px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.05em;display:flex;align-items:center;gap:8px;box-shadow:0 10px 25px rgba(0,0,0,0.5);pointer-events:none;">
+                <div style="position:fixed;top:24px;right:24px;z-index:99999;background:rgba(15,23,42,0.85);border:1px solid rgba(251,191,36,0.6);color:#fbbf24;padding:8px 18px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;box-shadow:0 10px 25px rgba(0,0,0,0.5);pointer-events:none;">
                     <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;box-shadow:0 0 8px #fbbf24;"></span>
                     <span>PAUSED</span>
                 </div>
@@ -622,63 +617,64 @@ function setPlaybackState(targetState) {
         const wasPaused = isPaused;
         isPaused = false;
 
-        const pauseIndicator = document.getElementById('mirror-pause-indicator');
+        const pauseIndicator = document.getElementById("mirror-pause-indicator");
         if (pauseIndicator) {
             pauseIndicator.remove();
         }
 
-        if (wasPaused && isSlideshowActive && ContentElement.length > 0) {
-            const currentEl = ContentElement[currentIndex];
-            if (currentEl && currentEl.tagName === "VIDEO" && currentVideoElement) {
-                currentVideoElement.play().catch(() => {});
+        if (wasPaused && isSlideshowActive && rawContents.length > 0) {
+            const currentItem = rawContents[currentIndex];
+            const currentUrl = currentItem ? currentItem.content_url : "";
+            const isVideo = currentItem && ((currentItem.content_format && currentItem.content_format.toLowerCase().includes("video")) ||
+                            /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(currentUrl));
+            const vidEl = getSlideshowVideo();
+
+            if (isVideo && vidEl && vidEl.style.display !== "none") {
+                vidEl.play().catch(() => {});
             } else {
                 if (slideshowTimer) clearTimeout(slideshowTimer);
                 slideshowTimer = setTimeout(() => {
-                    if (!isPaused) {
-                        currentIndex = (currentIndex + 1) % ContentElement.length;
-                        showCurrentFile();
+                    if (!isPaused && isSlideshowActive) {
+                        currentIndex = (currentIndex + 1) % rawContents.length;
+                        showCurrentFile(true);
                     }
-                }, 4000);
+                }, 3000);
             }
         }
     }
 }
 
-async function showCurrentFile(shouldBroadcast = true) {
-    const slideshowContainer = document.getElementById('slideshowContainer');
-    const login_container = document.getElementById('login_container');
-    if (login_container) login_container.style.display = 'none';
-
-    if (!slideshowContainer) return;
+// Low-RAM Smart TV Engine: Switches between single <img> and single <video> with strict decoder cleanup
+function showCurrentFile(shouldBroadcast = true) {
+    if (!isSlideshowActive) return;
 
     if (slideshowTimer) {
         clearTimeout(slideshowTimer);
         slideshowTimer = null;
     }
-    if (currentVideoElement) {
-        try {
-            currentVideoElement.pause();
-            currentVideoElement.onended = null;
-        } catch (e) {}
-        currentVideoElement = null;
-    }
 
-    if (!ContentElement || ContentElement.length === 0) {
-        slideshowContainer.innerHTML = '<div style="color:white;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;font-size:20px;letter-spacing:1px;background:#030712;"><span>Screen Idle — No media assigned to this mirror</span></div>';
+    if (!rawContents || rawContents.length === 0) {
+        releaseMediaResources();
+        showStandbyScreen();
         return;
     }
 
-    if (currentIndex >= ContentElement.length) {
-        if (initialServerIndex !== undefined && ContentElement.length > 0) {
-        currentIndex = initialServerIndex % ContentElement.length;
-    } else {
+    if (currentIndex >= rawContents.length) {
         currentIndex = 0;
     }
+
+    const currentItem = rawContents[currentIndex];
+    if (!currentItem || !currentItem.content_url) {
+        currentIndex = (currentIndex + 1) % rawContents.length;
+        slideshowTimer = setTimeout(() => showCurrentFile(true), 1000);
+        return;
     }
 
-    // Determine content ID and broadcast active slide to connected controller
-    const activeMeta = rawContents && rawContents[currentIndex];
-    const activeCid = activeMeta ? (activeMeta._id || activeMeta.id) : null;
+    const currentUrl = currentItem.content_url;
+    const isVideo = (currentItem.content_format && currentItem.content_format.toLowerCase().includes("video")) ||
+                    /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(currentUrl);
+
+    const activeCid = currentItem._id || currentItem.id;
     if (shouldBroadcast) {
         reportActiveSlide(activeCid, currentIndex);
     }
@@ -687,92 +683,132 @@ async function showCurrentFile(shouldBroadcast = true) {
         return;
     }
 
-    slideshowContainer.innerHTML = '';
-    const content = ContentElement[currentIndex];
+    const imgEl = getSlideshowImage();
+    const vidEl = getSlideshowVideo();
 
-    if (content.tagName === "VIDEO") {
-        currentVideoElement = content;
-        content.currentTime = 0;
-        slideshowContainer.appendChild(content);
+    if (isVideo) {
+        // Free image memory from GPU/RAM
+        if (imgEl) {
+            imgEl.onload = null;
+            imgEl.onerror = null;
+            imgEl.removeAttribute("src");
+            imgEl.style.display = "none";
+        }
 
-        content.play().then(() => {
-            content.onended = function () {
-                if (!isPaused) {
-                    currentIndex = (currentIndex + 1) % ContentElement.length;
-                    showCurrentFile();
+        if (vidEl) {
+            vidEl.style.display = "block";
+            vidEl.onended = null;
+            vidEl.onerror = null;
+
+            vidEl.src = currentUrl;
+            vidEl.currentTime = 0;
+
+            const handleVideoNext = () => {
+                if (!isPaused && isSlideshowActive) {
+                    currentIndex = (currentIndex + 1) % rawContents.length;
+                    showCurrentFile(true);
                 }
             };
-        }).catch(error => {
-            console.error("Failed to autoplay video:", error);
-            slideshowTimer = setTimeout(() => {
-                if (!isPaused) {
-                    currentIndex = (currentIndex + 1) % ContentElement.length;
-                    showCurrentFile();
-                }
-            }, 4000);
-        });
+
+            vidEl.onended = handleVideoNext;
+
+            // Handle Smart TV codec errors safely without crashing browser
+            vidEl.onerror = (e) => {
+                console.warn("[Smart TV Video] Video decode/network error:", e);
+                if (slideshowTimer) clearTimeout(slideshowTimer);
+                slideshowTimer = setTimeout(handleVideoNext, 3000);
+            };
+
+            const playPromise = vidEl.play();
+            if (playPromise !== undefined) {
+                playPromise.catch((err) => {
+                    console.warn("[Smart TV Video] Autoplay blocked or error:", err);
+                    if (slideshowTimer) clearTimeout(slideshowTimer);
+                    slideshowTimer = setTimeout(handleVideoNext, 4000);
+                });
+            }
+        }
     } else {
-        slideshowContainer.appendChild(content);
-        const durationSec = (activeMeta && activeMeta.duration) ? Number(activeMeta.duration) : (mirrorPhotoDuration || 5);
+        // Showing photo: Immediately free video hardware decoder and video buffer from TV firmware
+        if (vidEl) {
+            try {
+                vidEl.pause();
+                vidEl.onended = null;
+                vidEl.onerror = null;
+                vidEl.removeAttribute("src");
+                vidEl.load(); // Releases hardware video decoder
+            } catch (e) {}
+            vidEl.style.display = "none";
+        }
+
+        if (imgEl) {
+            imgEl.style.display = "block";
+            imgEl.src = currentUrl;
+        }
+
+        const durationSec = (currentItem.duration && Number(currentItem.duration) > 0)
+            ? Number(currentItem.duration)
+            : (mirrorPhotoDuration || 5);
         const durationMs = Math.max(1, durationSec) * 1000;
+
         slideshowTimer = setTimeout(() => {
-            if (!isPaused) {
-                currentIndex = (currentIndex + 1) % ContentElement.length;
-                showCurrentFile();
+            if (!isPaused && isSlideshowActive) {
+                currentIndex = (currentIndex + 1) % rawContents.length;
+                showCurrentFile(true);
             }
         }, durationMs);
     }
 }
 
-// TV Remote, Mouse, & Touch listeners to ensure immersive full screen
-['click', 'pointerdown', 'touchstart'].forEach(evt => {
+// User Gesture listeners for kiosk full-screen
+["click", "pointerdown", "touchstart"].forEach(evt => {
     document.addEventListener(evt, () => {
         enterFullscreen();
     }, { passive: true });
 });
 
-['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(evt => {
+["fullscreenchange", "webkitfullscreenchange", "mozfullscreenchange", "MSFullscreenChange"].forEach(evt => {
     document.addEventListener(evt, () => {
         const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-        const prompt = document.getElementById('kiosk-fullscreen-prompt');
+        const prompt = document.getElementById("kiosk-fullscreen-prompt");
         if (isFs) {
             if (prompt) prompt.remove();
-            document.body.classList.add('hide-cursor');
+            document.body.classList.add("hide-cursor");
         } else if (isSlideshowActive) {
             checkFullscreenKioskPrompt();
         }
     });
 });
 
-document.addEventListener('keydown', (e) => {
+document.addEventListener("keydown", (e) => {
     if (isSlideshowActive) {
         enterFullscreen();
-        if (e.key === 'p' || e.key === 'P' || e.key === ' ') {
+        if (e.key === "p" || e.key === "P" || e.key === " ") {
             e.preventDefault();
-            const targetState = isPaused ? 'playing' : 'paused';
+            const targetState = isPaused ? "playing" : "paused";
             setPlaybackState(targetState);
-            const req = { service: 'PlaybackControl', action: targetState, mirror_name: savedMirrorName };
+            const req = { service: "PlaybackControl", action: targetState, mirror_name: savedMirrorName };
             if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                 try { wsConnection.send(JSON.stringify(req)); } catch(err){}
             }
             fetch(SERVER_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(req)
             }).catch(() => {});
         }
     }
 });
 
-// Auto-hide mouse cursor after 2 seconds of inactivity on Smart TVs
+// Auto-hide mouse cursor after 2 seconds of inactivity
 let mouseInactivityTimer = null;
-document.addEventListener('mousemove', () => {
+document.addEventListener("mousemove", () => {
     if (!isSlideshowActive) return;
-    document.body.classList.remove('hide-cursor');
+    document.body.classList.remove("hide-cursor");
     if (mouseInactivityTimer) clearTimeout(mouseInactivityTimer);
     mouseInactivityTimer = setTimeout(() => {
         if (isSlideshowActive) {
-            document.body.classList.add('hide-cursor');
+            document.body.classList.add("hide-cursor");
         }
     }, 2000);
 });

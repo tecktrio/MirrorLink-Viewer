@@ -18,7 +18,10 @@
 
 <body>
     <!-- Full-screen presentation container for active images and videos -->
-    <div id="slideshowContainer" onclick="enterFullscreen()"></div>
+    <div id="slideshowContainer" onclick="enterFullscreen()">
+        <img id="slideshowImage" alt="Display Media" style="display: none;" />
+        <video id="slideshowVideo" muted playsinline webkit-playsinline preload="none" style="display: none;"></video>
+    </div>
 
     <!-- Login & Standby HUD -->
     <div id="login_container">
