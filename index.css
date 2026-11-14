@@ -594,10 +594,15 @@ body.hide-cursor * {
 .viewer-pause-card strong, .viewer-pause-card div > span { display: block; }
 .viewer-pause-card strong { font-size: 12px; }
 .viewer-pause-card div > span { margin-top: 3px; color: #666; font-size: 10px; line-height: 1.45; }
+#viewer-watermark { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); z-index: 20; color: #777; font-size: 10px; font-weight: 500; letter-spacing: .15px; pointer-events: none; text-align: right; }
+#viewer-watermark strong { color: #333; font-weight: 700; }
+body.slideshow-active #viewer-watermark { display: none; }
 
 @media only screen and (max-width: 480px) {
     #container {
         border-radius: 4px;
         padding: 30px 24px;
     }
+
+    #viewer-watermark { right: max(12px, env(safe-area-inset-right)); bottom: max(9px, env(safe-area-inset-bottom)); font-size: 9px; }
 }
