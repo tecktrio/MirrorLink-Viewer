@@ -1,10 +1,12 @@
 let currentIndex = 0;
 let initialServerIndex = 0;
 let savedMirrorName = "";
+let savedMirrorId = "";
 let slideshowTimer = null;
 let isSlideshowActive = false;
 let isReloading = false;
 let isPaused = false;
+let currentEligibilityCode = null;
 let rawContents = [];
 let lastKnownTimestamp = 0;
 let lastKnownSyncTimestamp = 0;
@@ -12,8 +14,8 @@ let pollTimeout = null;
 let mirrorPhotoDuration = 5;
 
 const SERVER_URL = "https://mirrorlink.bigburry.com/api/Mirror";
-const SERVER_STREAM_URL = "https://mirrorlink.bigburry.com/api/MirrorStream";
-let mirrorEventSource = null;
+const MQTT_BROKER_URL = window.MIRRORLINK_MQTT_URL || "wss://mirrorlink.bigburry.com/mqtt";
+let mirrorMqttClient = null;
 
 // Low-RAM Smart TV Architecture: Single Reusable DOM Elements
 function getSlideshowImage() {
@@ -204,13 +206,43 @@ function showStandbyScreen() {
                 <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#38bdf8;box-shadow:0 0 8px #38bdf8;"></span>
                 <span>Connected to <strong>${savedMirrorName || "Mirror"}</strong></span>
             </div>
-            <div style="margin-top: 14px; text-align: center; color: #94a3b8; font-size: 13px; line-height: 1.5;">
-                <p style="margin: 0; color: #f1f5f9; font-weight: 600;">Display Standby Active</p>
-                <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">Awaiting media contents from MirrorLink setup.<br>Presentation starts automatically once media is assigned.</p>
+            <div class="viewer-standby-copy">
+                <p class="viewer-reason-title">No active media assigned</p>
+                <p>In the MirrorLink control panel, add media to this mirror or re-enable a disabled playlist item. Playback starts automatically when active media is available.</p>
             </div>
         `;
         startBanner.style.display = "block";
     }
+}
+
+function showSubscriptionInactiveScreen() {
+    showStandbyScreen();
+    const startBanner = document.getElementById("startBanner");
+    if (!startBanner) return;
+    startBanner.innerHTML = `
+        <div class="viewer-reason-card">
+            <span class="viewer-reason-kicker">MIRRORLINK ACCOUNT</span>
+            <h2>Subscription inactive</h2>
+            <p>This display stopped receiving content because the account subscription is inactive or was not found.</p>
+            <ol><li>Sign in to the control panel using the account that owns this mirror.</li><li>Open Pricing and activate the MirrorLink subscription.</li><li>Return here and reconnect the display.</li></ol>
+            <a href="https://mirrorlink.bigburry.com/login?next=%2Fpricing" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
+        </div>`;
+    startBanner.style.display = "block";
+}
+
+function showMirrorInactiveScreen() {
+    showStandbyScreen();
+    const startBanner = document.getElementById("startBanner");
+    if (!startBanner) return;
+    startBanner.innerHTML = `
+        <div class="viewer-reason-card">
+            <span class="viewer-reason-kicker">DISPLAY STATUS</span>
+            <h2>Mirror inactive</h2>
+            <p>This mirror has been marked inactive, so it cannot receive or play content.</p>
+            <ol><li>Sign in to the MirrorLink control panel.</li><li>Ask the account administrator to reactivate this mirror.</li><li>Reconnect the display after it has been reactivated.</li></ol>
+            <a href="https://mirrorlink.bigburry.com/login?next=%2Fmanage_mirrors" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
+        </div>`;
+    startBanner.style.display = "block";
 }
 
 function showLoginDialog() {
@@ -308,130 +340,174 @@ function Login(e) {
         localStorage.setItem("mirror_saved_name", mirrorName);
     } catch (err) { }
 
-    connectMirrorStream(mirrorName);
+    connectMirrorMQTT(mirrorName);
 }
 
 // =========================================================================
-// Real-Time Server-Driven Conductor: Server-Sent Events (SSE) Stream
-// The server owns the master timeline and triggers slide changes to 100+
-// screens simultaneously with ZERO client polling overhead.
+// Real-Time Server-Driven Conductor: MQTT topic subscription.
+// The server owns the playback clock and publishes each content trigger.
 // =========================================================================
-function connectMirrorStream(mirrorName) {
-    if (mirrorEventSource) {
-        try { mirrorEventSource.close(); } catch (e) { }
-        mirrorEventSource = null;
-    }
-
+function connectMirrorMQTT(mirrorName) {
+    if (mirrorMqttClient) { try { mirrorMqttClient.end(true); } catch (e) { } }
     const errorText = document.getElementById("error");
     const loading_button = document.getElementById("loading_button");
     const login_button = document.getElementById("login_button");
-
-    const streamUrl = `${SERVER_STREAM_URL}?mirror_name=${encodeURIComponent(mirrorName)}`;
-    console.log("[MirrorSync] Connecting real-time Server Conductor stream:", streamUrl);
-
+    let mqttConnected = false;
+    const subscribeMirror = () => {
+        if (mqttConnected && savedMirrorId && mirrorMqttClient) {
+            mirrorMqttClient.subscribe(`mirror/${savedMirrorId}`, { qos: 1 });
+        }
+    };
     try {
-        mirrorEventSource = new EventSource(streamUrl);
-
-        // 1. Initial State Handshake: Server sends current playlist and active index on connect
-        mirrorEventSource.addEventListener("init", (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                console.log("[MirrorSync] Initial state received from server conductor:", data);
-                if (data.status_code === 404) {
-                    if (errorText) {
-                        errorText.innerText = data.status_text || `Mirror "${mirrorName}" not found. Check the mirror name.`;
-                        errorText.style.display = "block";
-                    }
-                    if (loading_button) loading_button.style.display = "none";
-                    if (login_button) login_button.style.display = "flex";
-                    return;
-                }
-
-                if (errorText) errorText.style.display = "none";
-                if (loading_button) loading_button.style.display = "none";
-                if (login_button) login_button.style.display = "flex";
-
-                if (data.photo_duration) mirrorPhotoDuration = Number(data.photo_duration);
-                if (data.active_content_index !== undefined) {
-                    currentIndex = Number(data.active_content_index);
-                    initialServerIndex = currentIndex;
-                }
-                isPaused = (data.playback_state === "paused");
-
-                rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
-                if (rawContents.length === 0) {
-                    console.log("[MirrorSync] No media assigned to this mirror yet.");
-                    showStandbyScreen();
-                } else {
-                    console.log(`[MirrorSync] Loaded ${rawContents.length} media item(s). Starting synchronized slideshow at index ${currentIndex}.`);
-                    startSlideshow();
-                }
-            } catch (err) {
-                console.error("[MirrorSync] Init event parse error:", err);
-            }
+        mirrorMqttClient = window.mqtt.connect(MQTT_BROKER_URL, {
+            ...(window.MIRRORLINK_MQTT_OPTIONS || {}),
+            reconnectPeriod: 3000,
+            connectTimeout: 10000
         });
-
-        // 2. Synchronized Slide Transition Trigger:
-        // All 100+ screens receive this event at the exact same millisecond and switch together!
-        mirrorEventSource.addEventListener("slide_change", (e) => {
+        mirrorMqttClient.on("connect", () => {
+            mqttConnected = true;
+            subscribeMirror();
+        });
+        mirrorMqttClient.on("message", (_topic, payload) => {
             try {
-                const data = JSON.parse(e.data);
-                console.log("[MirrorSync] Server conductor triggered slide change:", data.index);
-                if (data.index !== undefined && rawContents.length > 0) {
-                    const newIndex = Number(data.index) % rawContents.length;
-                    currentIndex = newIndex;
-                    initialServerIndex = newIndex;
-                    if (!isSlideshowActive) {
-                        startSlideshow();
+                const message = JSON.parse(payload.toString());
+                const data = message.data || {};
+                if (message.event === "eligibility_status") {
+                    const statusCode = Number(data.status_code);
+                    if (currentEligibilityCode === statusCode) return;
+                    currentEligibilityCode = statusCode;
+                    if (statusCode === 600) showMirrorInactiveScreen();
+                    else showSubscriptionInactiveScreen();
+                } else if (message.event === "init") {
+                    currentEligibilityCode = null;
+                    rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
+                    if (data.photo_duration) mirrorPhotoDuration = Number(data.photo_duration);
+                    if (data.active_content_index !== undefined) currentIndex = initialServerIndex = Number(data.active_content_index);
+                    const errorText = document.getElementById("error");
+                    if (errorText) errorText.style.display = "none";
+                    if (rawContents.length) {
+                        const initialIndex = Number(data.active_content_index);
+                        currentIndex = initialServerIndex = Number.isInteger(initialIndex) && initialIndex >= 0
+                            ? initialIndex % rawContents.length
+                            : 0;
+                        if (!isSlideshowActive) startSlideshow();
+                        if (data.playback_state) setPlaybackState(data.playback_state);
                     } else {
-                        showCurrentFile(false);
+                        showStandbyScreen();
                     }
-                }
-            } catch (err) {
-                console.error("[MirrorSync] Slide change trigger error:", err);
-            }
+                } else if (message.event === "slide_change") {
+                    currentEligibilityCode = null;
+                    const startBanner = document.getElementById("startBanner");
+                    if (startBanner) startBanner.style.display = "none";
+                    let item = data.content_id && rawContents.find(c => String(c._id || c.id) === String(data.content_id));
+                    if (!item && data.content) {
+                        item = { ...data.content, _id: data.content._id || data.content_id };
+                    }
+                    if (!item && data.content_url) item = { ...data, _id: data.content_id };
+                    if (item) {
+                        const existingIndex = rawContents.findIndex(c => String(c._id || c.id) === String(item._id || item.id));
+                        if (existingIndex >= 0) {
+                            rawContents[existingIndex] = { ...rawContents[existingIndex], ...item };
+                        } else {
+                            const insertionIndex = Number.isInteger(Number(data.index))
+                                ? Math.max(0, Math.min(Number(data.index), rawContents.length))
+                                : rawContents.length;
+                            rawContents.splice(insertionIndex, 0, item);
+                        }
+                        currentIndex = initialServerIndex = rawContents.indexOf(item);
+                        if (currentIndex < 0) {
+                            currentIndex = initialServerIndex = existingIndex;
+                        }
+                        if (!isSlideshowActive) startSlideshow(); else showCurrentFile(false);
+                        if (isPaused) setPlaybackState("playing");
+                    }
+                } else if (message.event === "playback_control") setPlaybackState(data.action);
+                else if (message.event === "update_playlist") reloadMirrorContents(data.data);
+                else if (message.event === "standby") showStandbyScreen();
+            } catch (err) { console.error("[MirrorSync] MQTT event error:", err); }
         });
+        mirrorMqttClient.on("error", err => console.warn("[MirrorSync] MQTT connection error:", err));
+    } catch (err) { console.error("[MirrorSync] Failed to initialize MQTT:", err); }
 
-        // 3. Central Playback Control: Admin paused or resumed the mirror from dashboard
-        mirrorEventSource.addEventListener("playback_control", (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                console.log("[MirrorSync] Server pushed playback control:", data.action);
-                setPlaybackState(data.action);
-            } catch (err) {
-                console.error("[MirrorSync] Playback control error:", err);
-            }
-        });
-
-        // 4. Content / Playlist Update: Admin added, reordered, or removed content
-        mirrorEventSource.addEventListener("update_playlist", (e) => {
-            try {
-                const data = JSON.parse(e.data);
-                console.log("[MirrorSync] Server pushed updated playlist:", data);
-                reloadMirrorContents(data.data);
-            } catch (err) {
-                console.error("[MirrorSync] Playlist update error:", err);
-            }
-        });
-
-        // 5. Standby screen: No content assigned
-        mirrorEventSource.addEventListener("standby", (e) => {
-            console.log("[MirrorSync] Standby triggered by server.");
+    // Resolve the mirror and load its initial content independently of MQTT.
+    // This keeps the screen useful during broker reconnects and with older servers.
+    fetch(SERVER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service: "login", mirror_name: mirrorName })
+    }).then(async res => {
+        const data = await res.json();
+        if (!res.ok || (Number(data.status_code) >= 400)) {
+            const error = new Error(data.status_text || (res.status === 402
+                ? "This mirror is in setup mode. Subscribe to activate live playback."
+                : "Unable to connect this mirror."));
+            error.status = Number(data.status_code) >= 400 ? Number(data.status_code) : res.status;
+            error.data = data;
+            throw error;
+        }
+        return data;
+    }).then(data => {
+        currentEligibilityCode = null;
+        if (errorText) errorText.style.display = "none";
+        if (loading_button) loading_button.style.display = "none";
+        if (login_button) login_button.style.display = "flex";
+        savedMirrorId = data.mirror_id || "";
+        subscribeMirror();
+        if (data.photo_duration) mirrorPhotoDuration = Number(data.photo_duration);
+        isPaused = data.playback_state === "paused";
+        rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
+        if (rawContents.length) {
+            const initialIndex = Number(data.active_content_index);
+            currentIndex = initialServerIndex = Number.isInteger(initialIndex) && initialIndex >= 0
+                ? initialIndex % rawContents.length
+                : 0;
+            startSlideshow();
+            setPlaybackState(data.playback_state || "playing");
+        } else {
             showStandbyScreen();
-        });
-
-        mirrorEventSource.onerror = (err) => {
-            console.warn("[MirrorSync] SSE stream interrupted. Holding current slide on screen while auto-reconnecting...", err);
-            // EventSource automatically reconnects. While disconnected, the current slide stays on screen without crashing.
-        };
-
-        mirrorEventSource.onopen = () => {
-            console.log("[MirrorSync] SSE Stream connected. Ready for server triggers.");
-        };
-
-    } catch (e) {
-        console.error("[MirrorSync] Failed to initialize EventSource:", e);
-    }
+        }
+    }).catch(err => {
+        console.error("[MirrorSync] Mirror login failed:", err);
+        if (err.data && err.data.mirror_id) {
+            savedMirrorId = err.data.mirror_id;
+            subscribeMirror();
+        }
+        if (errorText) {
+            if (err.status === 402) {
+                errorText.classList.add("subscription-required");
+                errorText.classList.remove("mirror-inactive");
+                errorText.innerHTML = `
+                    <strong>Subscription not found or inactive</strong>
+                    <p>This display is in setup mode. Activate a MirrorLink subscription to start streaming content.</p>
+                    <ol>
+                        <li>Open the MirrorLink control panel and sign in to the account that owns this mirror.</li>
+                        <li>Choose <strong>Pricing</strong> and complete the subscription.</li>
+                        <li>Return here and reconnect the display.</li>
+                    </ol>
+                    <a href="https://mirrorlink.bigburry.com/login?next=%2Fpricing" target="_blank" rel="noopener noreferrer">Open control panel and subscribe <span aria-hidden="true">↗</span></a>
+                `;
+            } else if (err.status === 423) {
+                errorText.classList.remove("subscription-required");
+                errorText.classList.add("mirror-inactive");
+                errorText.innerHTML = `
+                    <strong>This mirror is inactive</strong>
+                    <p>The display cannot receive content while it is inactive.</p>
+                    <ol><li>Sign in to the MirrorLink control panel.</li><li>Ask the account administrator to reactivate this mirror.</li><li>Reconnect the display after it has been reactivated.</li></ol>
+                    <a href="https://mirrorlink.bigburry.com/login?next=%2Fmanage_mirrors" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
+                `;
+            } else {
+                errorText.classList.remove("subscription-required", "mirror-inactive");
+                errorText.textContent = err.message || "Unable to load mirror contents.";
+            }
+            errorText.style.display = "block";
+        }
+        if (loading_button) loading_button.style.display = "none";
+        if (login_button) login_button.style.display = "flex";
+        const loginContainer = document.getElementById("login_container");
+        const loginForm = document.getElementById("loadingText");
+        if (loginContainer) loginContainer.style.display = "flex";
+        if (loginForm) loginForm.style.display = "block";
+    });
 }
 
 function reloadMirrorContents(incomingContents) {
@@ -631,12 +707,7 @@ function setPlaybackState(targetState) {
         if (!pauseIndicator) {
             pauseIndicator = document.createElement("div");
             pauseIndicator.id = "mirror-pause-indicator";
-            pauseIndicator.innerHTML = `
-                <div style="position:fixed;top:24px;right:24px;z-index:99999;background:rgba(15,23,42,0.85);border:1px solid rgba(251,191,36,0.6);color:#fbbf24;padding:8px 18px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px;box-shadow:0 10px 25px rgba(0,0,0,0.5);pointer-events:none;">
-                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;box-shadow:0 0 8px #fbbf24;"></span>
-                    <span>PAUSED</span>
-                </div>
-            `;
+            pauseIndicator.innerHTML = `<div class="viewer-pause-card"><span class="viewer-pause-dot"></span><div><strong>Playback paused</strong><span>Resume this mirror from the MirrorLink control panel.</span></div></div>`;
             document.body.appendChild(pauseIndicator);
         }
     } else {
@@ -657,14 +728,6 @@ function setPlaybackState(targetState) {
 
             if (isVideo && vidEl && vidEl.style.display !== "none") {
                 vidEl.play().catch(() => { });
-            } else {
-                if (slideshowTimer) clearTimeout(slideshowTimer);
-                slideshowTimer = setTimeout(() => {
-                    if (!isPaused && isSlideshowActive) {
-                        currentIndex = (currentIndex + 1) % rawContents.length;
-                        showCurrentFile(true);
-                    }
-                }, 3000);
             }
         }
     }
@@ -705,8 +768,7 @@ function showCurrentFile(shouldBroadcast = true) {
 
     const currentItem = rawContents[currentIndex];
     if (!currentItem || !currentItem.content_url) {
-        currentIndex = (currentIndex + 1) % rawContents.length;
-        slideshowTimer = setTimeout(() => showCurrentFile(true), 1000);
+        // Keep the current frame until the server publishes a valid next item.
         return;
     }
 
@@ -717,10 +779,6 @@ function showCurrentFile(shouldBroadcast = true) {
     const activeCid = currentItem._id || currentItem.id;
     if (shouldBroadcast) {
         reportActiveSlide(activeCid, currentIndex);
-    }
-
-    if (isPaused) {
-        return;
     }
 
     // Preload next upcoming slide to eliminate network lag transitions
@@ -761,6 +819,15 @@ function showCurrentFile(shouldBroadcast = true) {
 
             vidEl.onplaying = onVideoStarted;
             vidEl.onloadeddata = onVideoStarted;
+            vidEl.onloadedmetadata = () => {
+                const duration = Number(vidEl.duration);
+                if (savedMirrorId && activeCid && Number.isFinite(duration) && duration > 0) {
+                    fetch(SERVER_URL, {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ service: "ReportContentDuration", mirror_id: savedMirrorId, content_id: activeCid, duration })
+                    }).catch(() => { });
+                }
+            };
             // Safety watchdog: ensure previous image is hidden if video started silently
             setTimeout(onVideoStarted, 2500);
 
@@ -773,31 +840,9 @@ function showCurrentFile(shouldBroadcast = true) {
 
             vidEl.onended = handleVideoNext;
 
-            // Video watchdog timer: ensures a stalled network stream never freezes the display
-            const fallbackDuration = (currentItem.duration && Number(currentItem.duration) > 0)
-                ? Number(currentItem.duration)
-                : (mirrorPhotoDuration || 10);
-            slideshowTimer = setTimeout(() => {
-                console.log("[Smart TV Video] Video watchdog timeout reached, advancing slide.");
-                handleVideoNext();
-            }, Math.max(5, fallbackDuration + 3) * 1000);
-
-            vidEl.onloadedmetadata = () => {
-                const actualDuration = (vidEl.duration && !isNaN(vidEl.duration) && vidEl.duration > 0)
-                    ? vidEl.duration
-                    : fallbackDuration;
-                if (slideshowTimer) clearTimeout(slideshowTimer);
-                slideshowTimer = setTimeout(() => {
-                    console.log("[Smart TV Video] Video duration watchdog timeout, advancing slide.");
-                    handleVideoNext();
-                }, Math.max(5, Math.ceil(actualDuration + 2)) * 1000);
-            };
-
             // Handle Smart TV codec errors safely without crashing browser
             vidEl.onerror = (e) => {
                 console.warn("[Smart TV Video] Video decode/network error:", e);
-                if (slideshowTimer) clearTimeout(slideshowTimer);
-                slideshowTimer = setTimeout(handleVideoNext, 3000);
             };
 
             vidEl.src = currentUrl;
@@ -808,13 +853,15 @@ function showCurrentFile(shouldBroadcast = true) {
                 vidEl.style.zIndex = "2";
             }
 
-            const playPromise = vidEl.play();
-            if (playPromise !== undefined) {
-                playPromise.catch((err) => {
-                    console.warn("[Smart TV Video] Autoplay blocked or error:", err);
-                    if (slideshowTimer) clearTimeout(slideshowTimer);
-                    slideshowTimer = setTimeout(handleVideoNext, 4000);
-                });
+            if (isPaused) {
+                vidEl.pause();
+            } else {
+                const playPromise = vidEl.play();
+                if (playPromise !== undefined) {
+                    playPromise.catch((err) => {
+                        console.warn("[Smart TV Video] Autoplay blocked or error:", err);
+                    });
+                }
             }
         }
     } else {

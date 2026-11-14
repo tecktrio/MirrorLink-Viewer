@@ -114,6 +114,13 @@
         </div>
     </div>
 
+    <script src="mqtt.min.js"></script>
+    <script>
+        // Set this to your MQTT broker's browser WebSocket endpoint.
+        // Example: window.MIRRORLINK_MQTT_URL = "wss://mqtt.example.com:9001/mqtt";
+        window.MIRRORLINK_MQTT_URL = window.MIRRORLINK_MQTT_URL || "wss://mirrorlink.bigburry.com/mqtt";
+        window.MIRRORLINK_MQTT_OPTIONS = window.MIRRORLINK_MQTT_OPTIONS || {};
+    </script>
     <script src="index.js"></script>
     <script>
         // Observe error div text changes to toggle visibility cleanly
