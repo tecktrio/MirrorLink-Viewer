@@ -208,7 +208,7 @@ function showStandbyScreen() {
             </div>
             <div class="viewer-standby-copy">
                 <p class="viewer-reason-title">No active media assigned</p>
-                <p>In the MirrorLink control panel, add media to this mirror or re-enable a disabled playlist item. Playback starts automatically when active media is available.</p>
+                <p>In the ScreenPilot control panel, add media to this mirror or re-enable a disabled playlist item. Playback starts automatically when active media is available.</p>
             </div>
         `;
         startBanner.style.display = "block";
@@ -224,7 +224,7 @@ function showSubscriptionInactiveScreen() {
             <span class="viewer-reason-kicker">MIRRORLINK ACCOUNT</span>
             <h2>Subscription inactive</h2>
             <p>This display stopped receiving content because the account subscription is inactive or was not found.</p>
-            <ol><li>Sign in to the control panel using the account that owns this mirror.</li><li>Open Pricing and activate the MirrorLink subscription.</li><li>Return here and reconnect the display.</li></ol>
+            <ol><li>Sign in to the control panel using the account that owns this mirror.</li><li>Open Pricing and activate the ScreenPilot subscription.</li><li>Return here and reconnect the display.</li></ol>
             <a href="https://mirrorlink.bigburry.com/login?next=%2Fpricing" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
         </div>`;
     startBanner.style.display = "block";
@@ -239,7 +239,7 @@ function showMirrorInactiveScreen() {
             <span class="viewer-reason-kicker">DISPLAY STATUS</span>
             <h2>Mirror inactive</h2>
             <p>This mirror has been marked inactive, so it cannot receive or play content.</p>
-            <ol><li>Sign in to the MirrorLink control panel.</li><li>Ask the account administrator to reactivate this mirror.</li><li>Reconnect the display after it has been reactivated.</li></ol>
+            <ol><li>Sign in to the ScreenPilot control panel.</li><li>Ask the account administrator to reactivate this mirror.</li><li>Reconnect the display after it has been reactivated.</li></ol>
             <a href="https://mirrorlink.bigburry.com/login?next=%2Fmanage_mirrors" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
         </div>`;
     startBanner.style.display = "block";
@@ -478,9 +478,9 @@ function connectMirrorMQTT(mirrorName) {
                 errorText.classList.remove("mirror-inactive");
                 errorText.innerHTML = `
                     <strong>Subscription not found or inactive</strong>
-                    <p>This display is in setup mode. Activate a MirrorLink subscription to start streaming content.</p>
+                    <p>This display is in setup mode. Activate a ScreenPilot subscription to start streaming content.</p>
                     <ol>
-                        <li>Open the MirrorLink control panel and sign in to the account that owns this mirror.</li>
+                        <li>Open the ScreenPilot control panel and sign in to the account that owns this mirror.</li>
                         <li>Choose <strong>Pricing</strong> and complete the subscription.</li>
                         <li>Return here and reconnect the display.</li>
                     </ol>
@@ -492,7 +492,7 @@ function connectMirrorMQTT(mirrorName) {
                 errorText.innerHTML = `
                     <strong>This mirror is inactive</strong>
                     <p>The display cannot receive content while it is inactive.</p>
-                    <ol><li>Sign in to the MirrorLink control panel.</li><li>Ask the account administrator to reactivate this mirror.</li><li>Reconnect the display after it has been reactivated.</li></ol>
+                    <ol><li>Sign in to the ScreenPilot control panel.</li><li>Ask the account administrator to reactivate this mirror.</li><li>Reconnect the display after it has been reactivated.</li></ol>
                     <a href="https://mirrorlink.bigburry.com/login?next=%2Fmanage_mirrors" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
                 `;
             } else {
@@ -707,7 +707,7 @@ function setPlaybackState(targetState) {
         if (!pauseIndicator) {
             pauseIndicator = document.createElement("div");
             pauseIndicator.id = "mirror-pause-indicator";
-            pauseIndicator.innerHTML = `<div class="viewer-pause-card"><span class="viewer-pause-dot"></span><div><strong>Playback paused</strong><span>Resume this mirror from the MirrorLink control panel.</span></div></div>`;
+            pauseIndicator.innerHTML = `<div class="viewer-pause-card"><span class="viewer-pause-dot"></span><div><strong>Playback paused</strong><span>Resume this mirror from the ScreenPilot control panel.</span></div></div>`;
             document.body.appendChild(pauseIndicator);
         }
     } else {
