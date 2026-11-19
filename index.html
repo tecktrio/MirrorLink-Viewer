@@ -41,12 +41,14 @@
         <div id="container">
             <!-- Brand Header -->
             <div class="brand-header">
+                <div class="brand-logo-wrap">
+                    <img src="logo.png" alt="ScreenPilot" class="brand-logo" />
+                </div>
                 <div class="brand-badge">
                     <span class="status-dot"></span>
                     <span>Display Client v2.0</span>
                 </div>
-                <h1 class="brand-title">Mirror<span>Link</span></h1>
-                <p class="brand-subtitle">Smart Digital Signage &amp; High-Definition Mirror Controller</p>
+                <p class="brand-subtitle">Smart Digital Signage &amp; High-Definition Screen Controller</p>
             </div>
 
             <!-- Ready / Start Banner (hidden by default until content loads) -->
@@ -122,7 +124,7 @@
     <script>
         // Set this to your MQTT broker's browser WebSocket endpoint.
         // Example: window.MIRRORLINK_MQTT_URL = "wss://mqtt.example.com:9001/mqtt";
-        window.MIRRORLINK_MQTT_URL = window.MIRRORLINK_MQTT_URL || "wss://mirrorlink.bigburry.com/mqtt";
+        window.MIRRORLINK_MQTT_URL = window.MIRRORLINK_MQTT_URL || "wss://screenpilot.bigburry.com/mqtt";
         window.MIRRORLINK_MQTT_OPTIONS = window.MIRRORLINK_MQTT_OPTIONS || {};
     </script>
     <script src="index.js"></script>

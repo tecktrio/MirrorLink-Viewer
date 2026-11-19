@@ -13,8 +13,8 @@ let lastKnownSyncTimestamp = 0;
 let pollTimeout = null;
 let mirrorPhotoDuration = 5;
 
-const SERVER_URL = "https://mirrorlink.bigburry.com/api/Mirror";
-const MQTT_BROKER_URL = window.MIRRORLINK_MQTT_URL || "wss://mirrorlink.bigburry.com/mqtt";
+const SERVER_URL = "https://screenpilot.bigburry.com/api/Mirror";
+const MQTT_BROKER_URL = window.MIRRORLINK_MQTT_URL || "wss://screenpilot.bigburry.com/mqtt";
 let mirrorMqttClient = null;
 
 // Low-RAM Smart TV Architecture: Single Reusable DOM Elements
@@ -225,7 +225,7 @@ function showSubscriptionInactiveScreen() {
             <h2>Subscription inactive</h2>
             <p>This display stopped receiving content because the account subscription is inactive or was not found.</p>
             <ol><li>Sign in to the control panel using the account that owns this mirror.</li><li>Open Pricing and activate the ScreenPilot subscription.</li><li>Return here and reconnect the display.</li></ol>
-            <a href="https://mirrorlink.bigburry.com/login?next=%2Fpricing" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
+            <a href="https://screenpilot.bigburry.com/login?next=%2Fpricing" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
         </div>`;
     startBanner.style.display = "block";
 }
@@ -240,7 +240,7 @@ function showMirrorInactiveScreen() {
             <h2>Mirror inactive</h2>
             <p>This mirror has been marked inactive, so it cannot receive or play content.</p>
             <ol><li>Sign in to the ScreenPilot control panel.</li><li>Ask the account administrator to reactivate this mirror.</li><li>Reconnect the display after it has been reactivated.</li></ol>
-            <a href="https://mirrorlink.bigburry.com/login?next=%2Fmanage_mirrors" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
+            <a href="https://screenpilot.bigburry.com/login?next=%2Fmanage_mirrors" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
         </div>`;
     startBanner.style.display = "block";
 }
@@ -484,7 +484,7 @@ function connectMirrorMQTT(mirrorName) {
                         <li>Choose <strong>Pricing</strong> and complete the subscription.</li>
                         <li>Return here and reconnect the display.</li>
                     </ol>
-                    <a href="https://mirrorlink.bigburry.com/login?next=%2Fpricing" target="_blank" rel="noopener noreferrer">Open control panel and subscribe <span aria-hidden="true">↗</span></a>
+                    <a href="https://screenpilot.bigburry.com/login?next=%2Fpricing" target="_blank" rel="noopener noreferrer">Open control panel and subscribe <span aria-hidden="true">↗</span></a>
                 `;
             } else if (err.status === 423) {
                 errorText.classList.remove("subscription-required");
@@ -493,7 +493,7 @@ function connectMirrorMQTT(mirrorName) {
                     <strong>This mirror is inactive</strong>
                     <p>The display cannot receive content while it is inactive.</p>
                     <ol><li>Sign in to the ScreenPilot control panel.</li><li>Ask the account administrator to reactivate this mirror.</li><li>Reconnect the display after it has been reactivated.</li></ol>
-                    <a href="https://mirrorlink.bigburry.com/login?next=%2Fmanage_mirrors" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
+                    <a href="https://screenpilot.bigburry.com/login?next=%2Fmanage_mirrors" target="_blank" rel="noopener noreferrer">Open control panel <span aria-hidden="true">↗</span></a>
                 `;
             } else {
                 errorText.classList.remove("subscription-required", "mirror-inactive");
