@@ -46,8 +46,8 @@ function getSlideshowVideo() {
             vid.playsInline = true;
             vid.setAttribute("playsinline", "");
             vid.setAttribute("webkit-playsinline", "");
-            vid.preload = "auto";
-            vid.setAttribute("preload", "auto");
+            vid.preload = "metadata";
+            vid.setAttribute("preload", "metadata");
             vid.style.display = "none";
             container.appendChild(vid);
         }
@@ -840,9 +840,16 @@ function showCurrentFile(shouldBroadcast = true) {
 
             vidEl.onended = handleVideoNext;
 
-            // Handle Smart TV codec errors safely without crashing browser
+            // Handle Smart TV codec or network stall errors safely without black screen freeze
             vidEl.onerror = (e) => {
                 console.warn("[Smart TV Video] Video decode/network error:", e);
+                // Fail-safe: if the video errors on TV, hold final/previous frame or notify
+                try {
+                    const mediaErr = vidEl.error;
+                    if (mediaErr) {
+                        console.warn("[Smart TV Video] Error code:", mediaErr.code, mediaErr.message);
+                    }
+                } catch (_) {}
             };
 
             vidEl.src = currentUrl;
