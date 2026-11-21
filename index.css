@@ -677,3 +677,51 @@ body.slideshow-active #viewer-watermark { display: none; }
 
     #viewer-watermark { right: max(12px, env(safe-area-inset-right)); bottom: max(9px, env(safe-area-inset-bottom)); font-size: 9px; }
 }
+
+/* =========================================================================
+   Lightweight HTML/CSS/JS Transitions: Fade, Slide, Zoom
+   Hardware-accelerated CSS animations optimized for low-RAM Smart TVs
+   ========================================================================= */
+@keyframes spTransFade {
+    0% {
+        opacity: 0;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+@keyframes spTransSlide {
+    0% {
+        transform: translate3d(100%, 0, 0);
+    }
+    100% {
+        transform: translate3d(0, 0, 0);
+    }
+}
+
+@keyframes spTransZoom {
+    0% {
+        transform: scale(1.12);
+        opacity: 0;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.sp-transition-fade {
+    animation: spTransFade 0.6s cubic-bezier(0.25, 1, 0.5, 1) both !important;
+    will-change: opacity;
+}
+
+.sp-transition-slide {
+    animation: spTransSlide 0.6s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+    will-change: transform;
+}
+
+.sp-transition-zoom {
+    animation: spTransZoom 0.6s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+    will-change: transform, opacity;
+}

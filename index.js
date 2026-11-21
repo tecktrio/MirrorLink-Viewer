@@ -12,6 +12,22 @@ let lastKnownTimestamp = 0;
 let lastKnownSyncTimestamp = 0;
 let pollTimeout = null;
 let mirrorPhotoDuration = 5;
+let mirrorTransitions = [];
+let previousContentId = null;
+
+function applyTransitionEffect(element, transitionType) {
+    if (!element) return;
+    element.classList.remove("sp-transition-fade", "sp-transition-slide", "sp-transition-zoom");
+    if (transitionType && transitionType !== "none" && ["fade", "slide", "zoom"].includes(transitionType)) {
+        void element.offsetWidth; // Force DOM reflow to trigger CSS keyframe animation
+        element.classList.add(`sp-transition-${transitionType}`);
+        setTimeout(() => {
+            if (element) {
+                element.classList.remove(`sp-transition-${transitionType}`);
+            }
+        }, 650);
+    }
+}
 
 const SERVER_URL = "https://screenpilot.bigburry.com/api/Mirror";
 const MQTT_BROKER_URL = window.MIRRORLINK_MQTT_URL || "wss://screenpilot.bigburry.com/mqtt";
@@ -381,6 +397,7 @@ function connectMirrorMQTT(mirrorName) {
                 } else if (message.event === "init") {
                     currentEligibilityCode = null;
                     rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
+                    if (data.transitions) mirrorTransitions = data.transitions;
                     if (data.photo_duration) mirrorPhotoDuration = Number(data.photo_duration);
                     if (data.active_content_index !== undefined) currentIndex = initialServerIndex = Number(data.active_content_index);
                     const errorText = document.getElementById("error");
@@ -396,6 +413,10 @@ function connectMirrorMQTT(mirrorName) {
                         showStandbyScreen();
                     }
                 } else if (message.event === "slide_change") {
+                    if (slideshowTimer) {
+                        clearTimeout(slideshowTimer);
+                        slideshowTimer = null;
+                    }
                     currentEligibilityCode = null;
                     const startBanner = document.getElementById("startBanner");
                     if (startBanner) startBanner.style.display = "none";
@@ -422,7 +443,13 @@ function connectMirrorMQTT(mirrorName) {
                         if (isPaused) setPlaybackState("playing");
                     }
                 } else if (message.event === "playback_control") setPlaybackState(data.action);
-                else if (message.event === "update_playlist") reloadMirrorContents(data.data);
+                else if (message.event === "ReloadContents" || message.event === "update_playlist") {
+                    if (data.transitions) mirrorTransitions = data.transitions;
+                    reloadMirrorContents(data.data);
+                }
+                else if (message.event === "update_transitions") {
+                    mirrorTransitions = data.transitions || [];
+                }
                 else if (message.event === "standby") showStandbyScreen();
             } catch (err) { console.error("[MirrorSync] MQTT event error:", err); }
         });
@@ -431,6 +458,54 @@ function connectMirrorMQTT(mirrorName) {
 
     // Resolve the mirror and load its initial content independently of MQTT.
     // This keeps the screen useful during broker reconnects and with older servers.
+    // Built-in instant support for public demo mirror (no sign-in needed, test on any screen)
+    if (mirrorName && mirrorName.trim().toLowerCase() === "demo") {
+        const demoData = {
+            status_text: "ok",
+            status_code: 200,
+            mirror_id: "demo_screen_mock_id",
+            mirror_name: "demo",
+            photo_duration: 3,
+            active_content_index: 0,
+            playback_state: "playing",
+            data: [
+                {
+                    _id: "demo_content_vid_1",
+                    content_title: "Content 1",
+                    content_url: "https://screenpilot.bigburry.com/testvid1.mp4",
+                    content_format: "mp4",
+                    is_active: true,
+                    duration: 3
+                },
+                {
+                    _id: "demo_content_vid_2",
+                    content_title: "Content 2",
+                    content_url: "https://screenpilot.bigburry.com/testvid2.mp4",
+                    content_format: "mp4",
+                    is_active: true,
+                    duration: 3
+                },
+                {
+                    _id: "demo_content_vid_3",
+                    content_title: "Content 3",
+                    content_url: "https://screenpilot.bigburry.com/testvid3.mp4",
+                    content_format: "mp4",
+                    is_active: true,
+                    duration: 3
+                }
+            ]
+        };
+        currentEligibilityCode = null;
+        if (errorText) errorText.style.display = "none";
+        if (loading_button) loading_button.style.display = "none";
+        if (login_button) login_button.style.display = "flex";
+        savedMirrorId = demoData.mirror_id;
+        subscribeMirror();
+        updateSyncProgress("Loading demo display playlist...");
+        reloadMirrorContents(demoData);
+        return;
+    }
+
     fetch(SERVER_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -454,6 +529,7 @@ function connectMirrorMQTT(mirrorName) {
         savedMirrorId = data.mirror_id || "";
         subscribeMirror();
         if (data.photo_duration) mirrorPhotoDuration = Number(data.photo_duration);
+        if (data.transitions) mirrorTransitions = data.transitions;
         isPaused = data.playback_state === "paused";
         rawContents = (data.data || []).filter(item => item && item.content_url && item.is_active !== false);
         if (rawContents.length) {
@@ -529,7 +605,10 @@ function reloadMirrorContents(incomingContents) {
             })
         })
             .then(res => res.json())
-            .then(data => data.data || [])
+            .then(data => {
+                if (data && data.transitions) mirrorTransitions = data.transitions;
+                return data.data || [];
+            })
             .catch(err => {
                 console.error("Error fetching fresh contents on reload:", err);
                 return [];
@@ -584,22 +663,22 @@ function checkFullscreenKioskPrompt() {
         prompt.id = "kiosk-fullscreen-prompt";
         prompt.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:rgba(15,23,42,0.92);border:1px solid rgba(168,85,247,0.6);color:#f8fafc;padding:10px 20px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;box-shadow:0 12px 32px rgba(0,0,0,0.6);cursor:pointer;user-select:none;max-width:92vw;text-align:center;";
 
-        if (isIPhoneDevice()) {
-            prompt.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-                <span>For Full-Screen on iOS: Tap Share ➔ <strong>Add to Home Screen</strong></span>
-                <span style="opacity:0.6;font-size:11px;margin-left:4px;">✕</span>
-            `;
-            setTimeout(() => {
-                const p = document.getElementById("kiosk-fullscreen-prompt");
-                if (p) p.remove();
-            }, 6000);
-        } else {
-            prompt.innerHTML = `
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-                <span>Tap / Click anywhere for Kiosk Full-Screen</span>
-            `;
-        }
+        // if (isIPhoneDevice()) {
+        //     prompt.innerHTML = `
+        //         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+        //         <span>For Full-Screen on iOS: Tap Share ➔ <strong>Add to Home Screen</strong></span>
+        //         <span style="opacity:0.6;font-size:11px;margin-left:4px;">✕</span>
+        //     `;
+        //     setTimeout(() => {
+        //         const p = document.getElementById("kiosk-fullscreen-prompt");
+        //         if (p) p.remove();
+        //     }, 6000);
+        // } else {
+        //     prompt.innerHTML = `
+        //         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        //         <span>Tap / Click anywhere for Kiosk Full-Screen</span>
+        //     `;
+        // }
 
         prompt.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -682,6 +761,12 @@ function startSlideshow() {
     }
 
     showCurrentFile(false);
+}
+
+function advanceNextSlide() {
+    if (!isSlideshowActive || isPaused || !rawContents || rawContents.length <= 1) return;
+    currentIndex = (currentIndex + 1) % rawContents.length;
+    showCurrentFile(true);
 }
 
 function reportActiveSlide(contentId, index) {
@@ -781,6 +866,19 @@ function showCurrentFile(shouldBroadcast = true) {
         reportActiveSlide(activeCid, currentIndex);
     }
 
+    // Match transition between previousContentId and activeCid
+    let transitionEffect = null;
+    if (previousContentId && activeCid && String(previousContentId) !== String(activeCid)) {
+        const match = (mirrorTransitions || []).find(t =>
+            String(t.left_content_id) === String(previousContentId) &&
+            String(t.right_content_id) === String(activeCid)
+        );
+        if (match && match.transition_id && match.transition_id !== 'none') {
+            transitionEffect = match.transition_id; // 'fade' | 'slide' | 'zoom'
+        }
+    }
+    previousContentId = activeCid;
+
     // Preload next upcoming slide to eliminate network lag transitions
     preloadNextSlide();
 
@@ -806,6 +904,7 @@ function showCurrentFile(shouldBroadcast = true) {
             const onVideoStarted = () => {
                 if (videoStarted) return;
                 videoStarted = true;
+                applyTransitionEffect(vidEl, transitionEffect);
                 vidEl.style.display = "block";
                 vidEl.style.zIndex = "2";
                 if (imgEl && imgEl.style.display !== "none") {
@@ -832,13 +931,18 @@ function showCurrentFile(shouldBroadcast = true) {
             setTimeout(onVideoStarted, 2500);
 
             const handleVideoNext = () => {
-                // Video ended: Hold final frame until server conductor triggers slide_change
                 if (vidEl) {
                     try { vidEl.pause(); } catch (e) { }
                 }
+                advanceNextSlide();
             };
 
             vidEl.onended = handleVideoNext;
+
+            if (rawContents.length > 1) {
+                const vidDuration = Number(currentItem.duration) || 10;
+                slideshowTimer = setTimeout(advanceNextSlide, Math.max(3, vidDuration + 2) * 1000);
+            }
 
             // Handle Smart TV codec or network stall errors safely without black screen freeze
             vidEl.onerror = (e) => {
@@ -849,7 +953,7 @@ function showCurrentFile(shouldBroadcast = true) {
                     if (mediaErr) {
                         console.warn("[Smart TV Video] Error code:", mediaErr.code, mediaErr.message);
                     }
-                } catch (_) {}
+                } catch (_) { }
             };
 
             vidEl.src = currentUrl;
@@ -882,6 +986,7 @@ function showCurrentFile(shouldBroadcast = true) {
             if (!isSlideshowActive || isPaused) return;
 
             if (imgEl) {
+                applyTransitionEffect(imgEl, transitionEffect);
                 imgEl.src = currentUrl;
                 imgEl.style.display = "block";
                 imgEl.style.zIndex = "2";
@@ -901,14 +1006,17 @@ function showCurrentFile(shouldBroadcast = true) {
                 vidEl.style.display = "none";
                 vidEl.style.zIndex = "1";
             }
+            // Client auto-advance fallback timer: Ensures mirror always cycles content smoothly
+            // even if MQTT broker is disconnected or delayed.
+            if (rawContents.length > 1) {
+                const photoDuration = Math.max(2, Number(currentItem.duration) || mirrorPhotoDuration || 5);
+                slideshowTimer = setTimeout(advanceNextSlide, photoDuration * 1000);
+            }
         };
 
         imgPreloader.onload = showLoadedImage;
         imgPreloader.onerror = showLoadedImage;
         imgPreloader.src = currentUrl;
-
-        // Note: Slide is NOT advanced by local client timer.
-        // It holds on screen until the central server conductor pushes the synchronized 'slide_change' trigger!
     }
 }
 
@@ -982,3 +1090,33 @@ setInterval(() => {
         window.location.reload();
     }
 }, 30 * 60 * 1000);
+
+// Periodic playlist sync watchdog: ensures any new media uploaded or changed from web app
+// is detected and loaded within seconds even on network hiccups or packet drops.
+setInterval(() => {
+    if (!savedMirrorId || !isSlideshowActive) return;
+    fetch(SERVER_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            service: "CheckMirrorUpdate",
+            mirror_id: savedMirrorId,
+            mirror_name: savedMirrorName
+        })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data && data.status_code === 200) {
+            if (data.transitions) mirrorTransitions = data.transitions;
+            const incomingRefresh = Number(data.last_refresh_timestamp || 0);
+            const freshItems = data.data || [];
+            if (incomingRefresh > lastKnownTimestamp) {
+                lastKnownTimestamp = incomingRefresh;
+                reloadMirrorContents(freshItems);
+            } else if (Array.isArray(freshItems) && freshItems.length !== rawContents.length) {
+                reloadMirrorContents(freshItems);
+            }
+        }
+    })
+    .catch(() => {});
+}, 10000);
