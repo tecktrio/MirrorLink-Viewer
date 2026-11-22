@@ -3,7 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -16,33 +17,34 @@
         // Auto-cleanup legacy service workers and bloated IndexedDB that crash TV memory on boot
         try {
             if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.getRegistrations().then(function(regs) {
+                navigator.serviceWorker.getRegistrations().then(function (regs) {
                     for (var i = 0; i < regs.length; i++) {
                         regs[i].unregister();
                     }
-                }).catch(function() {});
+                }).catch(function () { });
             }
             if (window.indexedDB && window.indexedDB.deleteDatabase) {
                 window.indexedDB.deleteDatabase('mirrorLinkContentStorage');
             }
-        } catch (e) {}
+        } catch (e) { }
     </script>
 </head>
 
 <body>
-    <!-- Warm Brown Loading Screen with Crisp White Circle Spinner -->
+    <!-- Premium White Loading Screen with Smooth Circle Spinner -->
     <div id="viewer_loading_screen" class="viewer-loading-screen">
         <div class="viewer-loading-content">
             <div class="viewer-circle-spinner"></div>
-            <p id="viewer_loading_title" class="viewer-loading-title">Loading Display...</p>
-            <p id="viewer_loading_sub" class="viewer-loading-sub">Connecting to mirror stream</p>
+            <p id="viewer_loading_title" class="viewer-loading-title">Downloading Latest Contents and syncing . please wait ...</p>
+            <p id="viewer_loading_sub" class="viewer-loading-sub" style="display: none;"></p>
         </div>
     </div>
 
     <!-- Full-screen presentation container for active images and videos -->
     <div id="slideshowContainer" onclick="enterFullscreen()">
         <img id="slideshowImage" alt="Display Media" style="display: none;" />
-        <video id="slideshowVideo" muted playsinline webkit-playsinline preload="metadata" style="display: none;"></video>
+        <video id="slideshowVideo" muted playsinline webkit-playsinline preload="metadata"
+            style="display: none;"></video>
     </div>
 
     <!-- Login & Standby HUD (hidden by default when loading direct mirror stream) -->

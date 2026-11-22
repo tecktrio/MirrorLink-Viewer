@@ -15,18 +15,26 @@ let mirrorPhotoDuration = 5;
 let mirrorTransitions = [];
 let previousContentId = null;
 
+const DEFAULT_LOADING_TEXT = "Downloading Latest Contents and syncing . please wait ...";
+
 function showViewerLoading(title, subtitle) {
     const el = document.getElementById("viewer_loading_screen");
     if (!el) return;
     el.classList.remove("hidden");
     el.style.display = "flex";
-    if (title) {
-        const tEl = document.getElementById("viewer_loading_title");
-        if (tEl) tEl.textContent = title;
+    const tEl = document.getElementById("viewer_loading_title");
+    if (tEl) {
+        tEl.textContent = title || DEFAULT_LOADING_TEXT;
     }
-    if (subtitle) {
-        const sEl = document.getElementById("viewer_loading_sub");
-        if (sEl) sEl.textContent = subtitle;
+    const sEl = document.getElementById("viewer_loading_sub");
+    if (sEl) {
+        if (subtitle) {
+            sEl.textContent = subtitle;
+            sEl.style.display = "block";
+        } else {
+            sEl.textContent = "";
+            sEl.style.display = "none";
+        }
     }
 }
 
@@ -330,7 +338,7 @@ function initAutoConnect() {
             const mInput = document.getElementById("mirror_name");
             if (mInput) mInput.value = cleanName;
 
-            showViewerLoading(cleanName, "Connecting to mirror stream...");
+            showViewerLoading(DEFAULT_LOADING_TEXT);
 
             const loading_button = document.getElementById("loading_button");
             const login_button = document.getElementById("login_button");
@@ -384,7 +392,7 @@ function Login(e) {
     if (loading_button) loading_button.style.display = "flex";
     if (login_button) login_button.style.display = "none";
     updateSyncProgress(`Connecting to ${mirrorName}...`);
-    showViewerLoading(mirrorName, "Syncing display media...");
+    showViewerLoading(DEFAULT_LOADING_TEXT);
 
     savedMirrorName = mirrorName;
     try {
@@ -684,44 +692,9 @@ function isStandaloneMode() {
 }
 
 function checkFullscreenKioskPrompt() {
-    if (isStandaloneMode()) return;
-
-    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-    let prompt = document.getElementById("kiosk-fullscreen-prompt");
-    if (isFs) {
-        if (prompt) prompt.remove();
-        return;
-    }
-    if (!isSlideshowActive) return;
-
-    if (!prompt) {
-        prompt = document.createElement("div");
-        prompt.id = "kiosk-fullscreen-prompt";
-        prompt.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:99999;background:rgba(15,23,42,0.92);border:1px solid rgba(168,85,247,0.6);color:#f8fafc;padding:10px 20px;border-radius:9999px;font-family:system-ui,-apple-system,sans-serif;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;box-shadow:0 12px 32px rgba(0,0,0,0.6);cursor:pointer;user-select:none;max-width:92vw;text-align:center;";
-
-        // if (isIPhoneDevice()) {
-        //     prompt.innerHTML = `
-        //         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
-        //         <span>For Full-Screen on iOS: Tap Share ➔ <strong>Add to Home Screen</strong></span>
-        //         <span style="opacity:0.6;font-size:11px;margin-left:4px;">✕</span>
-        //     `;
-        //     setTimeout(() => {
-        //         const p = document.getElementById("kiosk-fullscreen-prompt");
-        //         if (p) p.remove();
-        //     }, 6000);
-        // } else {
-        //     prompt.innerHTML = `
-        //         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-        //         <span>Tap / Click anywhere for Kiosk Full-Screen</span>
-        //     `;
-        // }
-
-        prompt.addEventListener("click", (e) => {
-            e.stopPropagation();
-            enterFullscreen();
-        });
-        document.body.appendChild(prompt);
-    }
+    // Notch / fullscreen floating prompt disabled to keep presentation display completely clean
+    const prompt = document.getElementById("kiosk-fullscreen-prompt");
+    if (prompt) prompt.remove();
 }
 
 function enterFullscreen() {
@@ -935,10 +908,10 @@ function showCurrentFile(shouldBroadcast = true) {
                 vidEl.pause();
             } catch (e) { }
 
-            // If video is not already loaded/buffered for this URL, show warm brown loading screen
+            // If video is not already loaded/buffered for this URL, show loading screen
             const isAlreadyLoaded = vidEl.src === currentUrl && vidEl.readyState >= 3;
             if (!isAlreadyLoaded) {
-                showViewerLoading(currentItem.content_title || savedMirrorName, "Loading video...");
+                showViewerLoading(DEFAULT_LOADING_TEXT);
             }
 
             // Seamless transition: Keep the previous image visible until the video has decoded its first frame!
@@ -1068,9 +1041,9 @@ function showCurrentFile(shouldBroadcast = true) {
         imgPreloader.onerror = showLoadedImage;
         imgPreloader.src = currentUrl;
 
-        // If the image is not already in memory/browser cache, show warm brown loading screen
+        // If the image is not already in memory/browser cache, show loading screen
         if (!imgPreloader.complete) {
-            showViewerLoading(currentItem.content_title || savedMirrorName, "Loading content...");
+            showViewerLoading(DEFAULT_LOADING_TEXT);
         } else {
             showLoadedImage();
         }

@@ -831,7 +831,7 @@ body.slideshow-active #viewer-watermark { display: none; }
 }
 
 /* =========================================================================
-   Viewer Warm Brown Loading Screen & White Circular Spinner
+   Viewer Premium White Loading Screen & Smooth Circle Spinner
    ========================================================================= */
 .viewer-loading-screen {
     position: fixed;
@@ -844,8 +844,8 @@ body.slideshow-active #viewer-watermark { display: none; }
     height: 100vh;
     height: 100dvh;
     height: -webkit-fill-available;
-    background-color: #241712;
-    background: radial-gradient(circle at center, #36221a 0%, #1c120e 100%);
+    background-color: #FAF8F5;
+    background: radial-gradient(circle at center, #FFFFFF 0%, #F5EFEB 100%);
     z-index: 99999;
     display: flex;
     align-items: center;
@@ -865,19 +865,22 @@ body.slideshow-active #viewer-watermark { display: none; }
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 24px;
+    padding: 32px 24px;
+    max-width: 90vw;
     user-select: none;
 }
 
-/* White Circle Loading Spinner */
+/* Premium Charcoal & Amber Circle Loading Spinner */
 .viewer-circle-spinner {
     width: 52px;
     height: 52px;
-    border: 4px solid rgba(255, 255, 255, 0.2);
-    border-top-color: #ffffff;
+    border: 3.5px solid rgba(42, 24, 16, 0.12);
+    border-top-color: #2A1810;
+    border-right-color: #8C532B;
     border-radius: 50%;
     animation: viewerCircleSpin 0.85s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
-    margin-bottom: 22px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 16px rgba(42, 24, 16, 0.06);
 }
 
 @keyframes viewerCircleSpin {
@@ -891,17 +894,19 @@ body.slideshow-active #viewer-watermark { display: none; }
 
 .viewer-loading-title {
     font-family: 'Uber Move', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: #ffffff;
-    font-size: 18px;
+    color: #2A1810;
+    font-size: clamp(16px, 2.5vw, 22px);
     font-weight: 700;
-    letter-spacing: 0.2px;
-    margin: 0 0 6px 0;
+    letter-spacing: -0.2px;
+    line-height: 1.35;
+    max-width: 520px;
+    margin: 0;
 }
 
 .viewer-loading-sub {
     font-family: 'Uber Move Text', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: rgba(255, 255, 255, 0.72);
+    color: #6B4C33;
     font-size: 13px;
-    font-weight: 400;
-    margin: 0;
+    font-weight: 500;
+    margin-top: 8px;
 }
