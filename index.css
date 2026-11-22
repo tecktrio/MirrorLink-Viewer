@@ -94,7 +94,7 @@ body {
     height: 100vh;
     height: 100dvh;
     height: -webkit-fill-available;
-    background-color: #000000;
+    background-color: #241712;
     z-index: 1;
     display: flex;
     align-items: center;
@@ -711,6 +711,85 @@ body.slideshow-active #viewer-watermark { display: none; }
     }
 }
 
+@keyframes spTransWipe {
+    0% {
+        clip-path: inset(0 100% 0 0);
+        opacity: 0.8;
+    }
+    100% {
+        clip-path: inset(0 0 0 0);
+        opacity: 1;
+    }
+}
+
+@keyframes spTransFlip {
+    0% {
+        transform: perspective(800px) rotateY(-90deg);
+        opacity: 0;
+    }
+    50% {
+        opacity: 0.7;
+    }
+    100% {
+        transform: perspective(800px) rotateY(0deg);
+        opacity: 1;
+    }
+}
+
+@keyframes spTransNeon {
+    0% {
+        opacity: 0.2;
+        filter: drop-shadow(0 0 30px #06b6d4) drop-shadow(0 0 60px #ec4899) saturate(2.5) brightness(1.3);
+        transform: scale(0.97);
+    }
+    50% {
+        opacity: 0.9;
+        filter: drop-shadow(0 0 45px #3b82f6) drop-shadow(0 0 70px #d946ef) saturate(2) brightness(1.2);
+        transform: scale(1.01);
+    }
+    100% {
+        opacity: 1;
+        filter: drop-shadow(0 0 0px transparent) saturate(1) brightness(1);
+        transform: scale(1);
+    }
+}
+
+@keyframes spTransRainbow {
+    0% {
+        opacity: 0.3;
+        filter: hue-rotate(180deg) saturate(3) drop-shadow(0 0 40px #8b5cf6) drop-shadow(0 0 60px #ec4899);
+        transform: scale(1.04);
+    }
+    50% {
+        opacity: 0.85;
+        filter: hue-rotate(90deg) saturate(2.2) drop-shadow(0 0 40px #10b981) drop-shadow(0 0 60px #f59e0b);
+        transform: scale(1.01);
+    }
+    100% {
+        opacity: 1;
+        filter: hue-rotate(0deg) saturate(1) drop-shadow(0 0 0px transparent);
+        transform: scale(1);
+    }
+}
+
+@keyframes spTransAmber {
+    0% {
+        opacity: 0.2;
+        filter: drop-shadow(0 0 35px #f97316) drop-shadow(0 0 70px #ef4444) brightness(1.5) sepia(0.6);
+        transform: scale(1.04);
+    }
+    50% {
+        opacity: 0.85;
+        filter: drop-shadow(0 0 40px #f97316) drop-shadow(0 0 60px #f59e0b) brightness(1.2) sepia(0.3);
+        transform: scale(1.01);
+    }
+    100% {
+        opacity: 1;
+        filter: drop-shadow(0 0 0px transparent) brightness(1) sepia(0);
+        transform: scale(1);
+    }
+}
+
 .sp-transition-fade {
     animation: spTransFade 0.6s cubic-bezier(0.25, 1, 0.5, 1) both !important;
     will-change: opacity;
@@ -724,4 +803,105 @@ body.slideshow-active #viewer-watermark { display: none; }
 .sp-transition-zoom {
     animation: spTransZoom 0.6s cubic-bezier(0.16, 1, 0.3, 1) both !important;
     will-change: transform, opacity;
+}
+
+.sp-transition-wipe {
+    animation: spTransWipe 0.6s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+    will-change: clip-path;
+}
+
+.sp-transition-flip {
+    animation: spTransFlip 0.6s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+    will-change: transform;
+}
+
+.sp-transition-neon {
+    animation: spTransNeon 0.65s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+    will-change: filter, transform, opacity;
+}
+
+.sp-transition-rainbow {
+    animation: spTransRainbow 0.65s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+    will-change: filter, transform, opacity;
+}
+
+.sp-transition-amber {
+    animation: spTransAmber 0.65s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+    will-change: filter, transform, opacity;
+}
+
+/* =========================================================================
+   Viewer Warm Brown Loading Screen & White Circular Spinner
+   ========================================================================= */
+.viewer-loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    height: -webkit-fill-available;
+    background-color: #241712;
+    background: radial-gradient(circle at center, #36221a 0%, #1c120e 100%);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+.viewer-loading-screen.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.viewer-loading-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    user-select: none;
+}
+
+/* White Circle Loading Spinner */
+.viewer-circle-spinner {
+    width: 52px;
+    height: 52px;
+    border: 4px solid rgba(255, 255, 255, 0.2);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: viewerCircleSpin 0.85s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
+    margin-bottom: 22px;
+}
+
+@keyframes viewerCircleSpin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.viewer-loading-title {
+    font-family: 'Uber Move', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    margin: 0 0 6px 0;
+}
+
+.viewer-loading-sub {
+    font-family: 'Uber Move Text', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 13px;
+    font-weight: 400;
+    margin: 0;
 }

@@ -15,10 +15,39 @@ let mirrorPhotoDuration = 5;
 let mirrorTransitions = [];
 let previousContentId = null;
 
+function showViewerLoading(title, subtitle) {
+    const el = document.getElementById("viewer_loading_screen");
+    if (!el) return;
+    el.classList.remove("hidden");
+    el.style.display = "flex";
+    if (title) {
+        const tEl = document.getElementById("viewer_loading_title");
+        if (tEl) tEl.textContent = title;
+    }
+    if (subtitle) {
+        const sEl = document.getElementById("viewer_loading_sub");
+        if (sEl) sEl.textContent = subtitle;
+    }
+}
+
+function hideViewerLoading() {
+    const el = document.getElementById("viewer_loading_screen");
+    if (!el) return;
+    el.classList.add("hidden");
+    setTimeout(() => {
+        if (el && el.classList.contains("hidden")) {
+            el.style.display = "none";
+        }
+    }, 450);
+}
+
+const ALL_TRANSITIONS = ["fade", "slide", "zoom", "wipe", "flip", "neon", "rainbow", "amber"];
+const ALL_TRANSITION_CLASSES = ALL_TRANSITIONS.map(t => `sp-transition-${t}`);
+
 function applyTransitionEffect(element, transitionType) {
     if (!element) return;
-    element.classList.remove("sp-transition-fade", "sp-transition-slide", "sp-transition-zoom");
-    if (transitionType && transitionType !== "none" && ["fade", "slide", "zoom"].includes(transitionType)) {
+    element.classList.remove(...ALL_TRANSITION_CLASSES);
+    if (transitionType && transitionType !== "none" && ALL_TRANSITIONS.includes(transitionType)) {
         void element.offsetWidth; // Force DOM reflow to trigger CSS keyframe animation
         element.classList.add(`sp-transition-${transitionType}`);
         setTimeout(() => {
@@ -204,6 +233,7 @@ function enableKeepAwake() {
 }
 
 function showStandbyScreen() {
+    hideViewerLoading();
     releaseMediaResources();
     isSlideshowActive = false;
     document.body.classList.remove("slideshow-active");
@@ -262,6 +292,7 @@ function showMirrorInactiveScreen() {
 }
 
 function showLoginDialog() {
+    hideViewerLoading();
     releaseMediaResources();
     isSlideshowActive = false;
     document.body.classList.remove("slideshow-active");
@@ -299,6 +330,8 @@ function initAutoConnect() {
             const mInput = document.getElementById("mirror_name");
             if (mInput) mInput.value = cleanName;
 
+            showViewerLoading(cleanName, "Connecting to mirror stream...");
+
             const loading_button = document.getElementById("loading_button");
             const login_button = document.getElementById("login_button");
             if (loading_button) loading_button.style.display = "flex";
@@ -309,6 +342,7 @@ function initAutoConnect() {
             Login();
         } else {
             console.log("No mirror_name in URL. Presenting mirror name dialog.");
+            hideViewerLoading();
             showLoginDialog();
         }
     } catch (e) {
@@ -350,6 +384,7 @@ function Login(e) {
     if (loading_button) loading_button.style.display = "flex";
     if (login_button) login_button.style.display = "none";
     updateSyncProgress(`Connecting to ${mirrorName}...`);
+    showViewerLoading(mirrorName, "Syncing display media...");
 
     savedMirrorName = mirrorName;
     try {
@@ -583,6 +618,7 @@ function connectMirrorMQTT(mirrorName) {
         const loginForm = document.getElementById("loadingText");
         if (loginContainer) loginContainer.style.display = "flex";
         if (loginForm) loginForm.style.display = "block";
+        hideViewerLoading();
     });
 }
 
@@ -899,11 +935,18 @@ function showCurrentFile(shouldBroadcast = true) {
                 vidEl.pause();
             } catch (e) { }
 
+            // If video is not already loaded/buffered for this URL, show warm brown loading screen
+            const isAlreadyLoaded = vidEl.src === currentUrl && vidEl.readyState >= 3;
+            if (!isAlreadyLoaded) {
+                showViewerLoading(currentItem.content_title || savedMirrorName, "Loading video...");
+            }
+
             // Seamless transition: Keep the previous image visible until the video has decoded its first frame!
             let videoStarted = false;
             const onVideoStarted = () => {
                 if (videoStarted) return;
                 videoStarted = true;
+                hideViewerLoading();
                 applyTransitionEffect(vidEl, transitionEffect);
                 vidEl.style.display = "block";
                 vidEl.style.zIndex = "2";
@@ -947,6 +990,7 @@ function showCurrentFile(shouldBroadcast = true) {
             // Handle Smart TV codec or network stall errors safely without black screen freeze
             vidEl.onerror = (e) => {
                 console.warn("[Smart TV Video] Video decode/network error:", e);
+                hideViewerLoading();
                 // Fail-safe: if the video errors on TV, hold final/previous frame or notify
                 try {
                     const mediaErr = vidEl.error;
@@ -982,7 +1026,13 @@ function showCurrentFile(shouldBroadcast = true) {
 
         // Seamless transition: Preload the image in memory before swapping so there is zero black flash
         const imgPreloader = new Image();
+        let imageProcessed = false;
+
         const showLoadedImage = () => {
+            if (imageProcessed) return;
+            imageProcessed = true;
+            hideViewerLoading();
+
             if (!isSlideshowActive || isPaused) return;
 
             if (imgEl) {
@@ -1017,6 +1067,13 @@ function showCurrentFile(shouldBroadcast = true) {
         imgPreloader.onload = showLoadedImage;
         imgPreloader.onerror = showLoadedImage;
         imgPreloader.src = currentUrl;
+
+        // If the image is not already in memory/browser cache, show warm brown loading screen
+        if (!imgPreloader.complete) {
+            showViewerLoading(currentItem.content_title || savedMirrorName, "Loading content...");
+        } else {
+            showLoadedImage();
+        }
     }
 }
 
